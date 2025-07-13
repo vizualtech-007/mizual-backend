@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: mizual-backend
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: BFL_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mizual-db
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: mizual-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: mizual-redis
+          property: connectionString
+      - key: S3_BUCKET_NAME
+        value: mizual-images
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+
+  - type: worker
+    name: mizual-worker
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "celery -A tasks.celery worker --loglevel=info --concurrency=2"
+    plan: starter
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: BFL_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mizual-db
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: mizual-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: mizual-redis
+          property: connectionString
+      - key: S3_BUCKET_NAME
+        value: mizual-images
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+
+  - type: redis
+    name: mizual-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  - name: mizual-db
+    plan: starter
