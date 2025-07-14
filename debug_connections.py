@@ -63,8 +63,8 @@ def test_database_connection():
     print_info(f"Connecting to: {database_url[:50]}...")
     
     try:
-        # Test connection
-        conn = psycopg2.connect(database_url)
+        # Test connection with SSL settings for Supabase
+        conn = psycopg2.connect(database_url, sslmode='require')
         cursor = conn.cursor()
         
         # Test query
