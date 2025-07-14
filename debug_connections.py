@@ -84,6 +84,13 @@ def test_database_connection():
         
     except Exception as e:
         print_error(f"Database connection failed: {str(e)}")
+        
+        # If direct connection fails, suggest pooled connection
+        if "Network is unreachable" in str(e) and "db." in database_url:
+            print_info("💡 Try using pooled connection instead of direct connection")
+            print_info("   Change: db.PROJECT.supabase.co:5432")
+            print_info("   To: aws-0-us-east-2.pooler.supabase.com:6543")
+        
         return False
 
 def test_redis_connection():
@@ -97,9 +104,9 @@ def test_redis_connection():
     print_info(f"Connecting to: {broker_url[:50]}...")
     
     try:
-        # Parse Redis URL
-        if broker_url.startswith('redis://'):
-            r = redis.from_url(broker_url)
+        # Parse Redis URL (support both redis:// and rediss://)
+        if broker_url.startswith('redis://') or broker_url.startswith('rediss://'):
+            r = redis.from_url(broker_url, ssl_cert_reqs=None)
         else:
             print_error("Invalid Redis URL format")
             return False
