@@ -9,6 +9,22 @@ celery = Celery(
     backend=os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 )
 
+# Configure SSL settings for Redis connections
+celery.conf.update(
+    broker_use_ssl={
+        'ssl_cert_reqs': None,
+        'ssl_ca_certs': None,
+        'ssl_certfile': None,
+        'ssl_keyfile': None,
+    },
+    redis_backend_use_ssl={
+        'ssl_cert_reqs': None,
+        'ssl_ca_certs': None,
+        'ssl_certfile': None,
+        'ssl_keyfile': None,
+    }
+)
+
 @celery.task
 def process_image_edit(edit_id: int):
     db = next(database.get_db())
