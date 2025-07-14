@@ -75,3 +75,4 @@ def get_edit_status(edit_uuid: str, db: Session = Depends(database.get_db)):
     if db_edit is None:
         raise HTTPException(status_code=404, detail="Edit not found")
     return db_edit
+
