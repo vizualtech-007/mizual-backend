@@ -3,21 +3,21 @@ from celery import Celery
 from . import crud, database, flux_api, s3, models
 import os
 
+# Get Redis URLs and modify them to work with Celery SSL requirements
+broker_url = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
+backend_url = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
+
+# For rediss:// URLs, add the required SSL parameter that Celery expects
+if broker_url.startswith('rediss://'):
+    broker_url = broker_url + ('&' if '?' in broker_url else '?') + 'ssl_cert_reqs=none'
+
+if backend_url.startswith('rediss://'):
+    backend_url = backend_url + ('&' if '?' in backend_url else '?') + 'ssl_cert_reqs=none'
+
 celery = Celery(
     __name__,
-    broker=os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0"),
-    backend=os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
-)
-
-# Configure SSL settings exactly like the debug script that worked
-celery.conf.update(
-    broker_connection_retry_on_startup=True,
-    broker_transport_options={
-        'ssl_cert_reqs': None,
-    },
-    result_backend_transport_options={
-        'ssl_cert_reqs': None,
-    }
+    broker=broker_url,
+    backend=backend_url
 )
 
 @celery.task
