@@ -10,20 +10,27 @@ celery = Celery(
 )
 
 # Configure SSL settings for Redis connections
-celery.conf.update(
-    broker_use_ssl={
-        'ssl_cert_reqs': None,
-        'ssl_ca_certs': None,
-        'ssl_certfile': None,
-        'ssl_keyfile': None,
-    },
-    redis_backend_use_ssl={
-        'ssl_cert_reqs': None,
-        'ssl_ca_certs': None,
-        'ssl_certfile': None,
-        'ssl_keyfile': None,
-    }
-)
+import ssl
+
+# Get the Redis URLs and add SSL parameters if they use rediss://
+broker_url = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
+backend_url = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
+
+if broker_url.startswith('rediss://'):
+    if '?' not in broker_url:
+        broker_url += '?ssl_cert_reqs=CERT_NONE'
+    elif 'ssl_cert_reqs' not in broker_url:
+        broker_url += '&ssl_cert_reqs=CERT_NONE'
+
+if backend_url.startswith('rediss://'):
+    if '?' not in backend_url:
+        backend_url += '?ssl_cert_reqs=CERT_NONE'
+    elif 'ssl_cert_reqs' not in backend_url:
+        backend_url += '&ssl_cert_reqs=CERT_NONE'
+
+# Update Celery configuration with modified URLs
+celery.conf.broker_url = broker_url
+celery.conf.result_backend = backend_url
 
 @celery.task
 def process_image_edit(edit_id: int):
