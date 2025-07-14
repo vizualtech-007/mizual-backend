@@ -1,6 +1,6 @@
 import asyncio
 from celery import Celery
-from . import crud, database, flux_api, s3, models
+import crud, database, flux_api, s3, models
 import os
 
 celery = Celery(
