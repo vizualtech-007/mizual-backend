@@ -17,28 +17,19 @@ s3_client = boto3.client(
 )
 
 def create_bucket_if_not_exists():
-    """Ensures the S3 bucket exists and applies a public read policy."""
+    """Ensures the S3 bucket exists. For Backblaze B2, bucket policy is set via dashboard."""
     try:
         s3_client.head_bucket(Bucket=S3_BUCKET_NAME)
+        print(f"✅ S3 bucket '{S3_BUCKET_NAME}' exists and is accessible")
     except ClientError as e:
         if e.response['Error']['Code'] == '404':
-            s3_client.create_bucket(Bucket=S3_BUCKET_NAME)
+            print(f"❌ Bucket '{S3_BUCKET_NAME}' not found")
+            raise Exception(f"Bucket '{S3_BUCKET_NAME}' does not exist. Please create it in Backblaze B2 dashboard.")
         else:
             raise
-
-    # Set a public read policy on the bucket
-    policy = {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": "*",
-                "Action": ["s3:GetObject"],
-                "Resource": [f"arn:aws:s3:::{S3_BUCKET_NAME}/*"]
-            }
-        ]
-    }
-    s3_client.put_bucket_policy(Bucket=S3_BUCKET_NAME, Policy=json.dumps(policy))
+    
+    # Note: Backblaze B2 doesn't support put_bucket_policy
+    # Bucket permissions are managed via B2 dashboard (already set to public)
 
 def upload_file_to_s3(file_bytes: bytes, file_name: str) -> str:
     """Uploads a file to S3 and returns its URL."""
