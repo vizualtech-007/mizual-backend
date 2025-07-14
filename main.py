@@ -3,8 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
-import models, schemas, database, crud, s3, tasks
-from database import engine
+from . import models, schemas, database, crud, s3, tasks
+from .database import engine
 import uuid
 import base64
 
