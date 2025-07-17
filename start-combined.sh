@@ -2,7 +2,10 @@
 
 # Start Celery worker in background
 echo "🚀 Starting Celery worker..."
-celery -A src.tasks.celery worker --loglevel=info --concurrency=1 --detach
+celery -A src.tasks.celery worker --loglevel=info --concurrency=1 &
+
+# Give Celery a moment to start and show any errors
+sleep 2
 
 # Start FastAPI server
 echo "🚀 Starting FastAPI server..."
