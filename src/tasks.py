@@ -20,7 +20,7 @@ celery = Celery(
     backend=backend_url
 )
 
-@celery.task
+@celery.task(name='tasks.process_image_edit')
 def process_image_edit(edit_id: int):
     db = next(database.get_db())
     edit = crud.get_edit(db, edit_id)
