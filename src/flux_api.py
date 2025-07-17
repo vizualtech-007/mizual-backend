@@ -24,6 +24,7 @@ async def edit_image_with_flux(image: bytes, prompt: str) -> bytes:
     data = {
         "prompt": prompt,
         "input_image": encoded_image,
+        "safety_tolerance": 2,  # Less restrictive moderation (0=strictest, 2=balanced)
     }
 
     async with httpx.AsyncClient(timeout=None) as client:
