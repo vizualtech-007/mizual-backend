@@ -27,19 +27,34 @@ class EditImageRequest(BaseModel):
 @app.on_event("startup")
 def startup_event():
     s3.create_bucket_if_not_exists()
-    with engine.connect() as connection:
-        # Ensure required columns exist and backfill UUIDs for existing records.
-        connection.execute(text("ALTER TABLE edits ADD COLUMN IF NOT EXISTS original_image_url VARCHAR"))
-        connection.execute(text("ALTER TABLE edits ADD COLUMN IF NOT EXISTS edited_image_url VARCHAR"))
-        connection.execute(text("ALTER TABLE edits ADD COLUMN IF NOT EXISTS uuid VARCHAR"))
-        connection.commit()
+    try:
+        with engine.connect() as connection:
+            # Set a shorter timeout for migrations
+            connection.execute(text("SET statement_timeout = '10s'"))
+            
+            # Try to add columns, but don't fail if they already exist
+            try:
+                connection.execute(text("ALTER TABLE edits ADD COLUMN IF NOT EXISTS original_image_url VARCHAR"))
+                connection.execute(text("ALTER TABLE edits ADD COLUMN IF NOT EXISTS edited_image_url VARCHAR"))
+                connection.execute(text("ALTER TABLE edits ADD COLUMN IF NOT EXISTS uuid VARCHAR"))
+                connection.commit()
+            except Exception as e:
+                print(f"Column migration skipped (likely already exists): {e}")
+                connection.rollback()
 
-        edits_without_uuid = connection.execute(text("SELECT id FROM edits WHERE uuid IS NULL"))
-        for row in edits_without_uuid:
-            edit_id = row[0]
-            new_uuid = str(uuid.uuid4())
-            connection.execute(text(f"UPDATE edits SET uuid = '{new_uuid}' WHERE id = {edit_id}"))
-        connection.commit()
+            # Backfill UUIDs only if needed
+            try:
+                edits_without_uuid = connection.execute(text("SELECT id FROM edits WHERE uuid IS NULL LIMIT 10"))
+                for row in edits_without_uuid:
+                    edit_id = row[0]
+                    new_uuid = str(uuid.uuid4())
+                    connection.execute(text(f"UPDATE edits SET uuid = '{new_uuid}' WHERE id = {edit_id}"))
+                connection.commit()
+            except Exception as e:
+                print(f"UUID backfill skipped: {e}")
+                connection.rollback()
+    except Exception as e:
+        print(f"Database migration failed, but continuing startup: {e}")
 
 @app.post("/edit-image/", response_model=schemas.EditCreateResponse)
 async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, db: Session = Depends(database.get_db)):
