@@ -8,7 +8,6 @@ def set_schema_for_session(db: Session):
     environment = os.environ.get("ENVIRONMENT", "production")
     schema_name = "preview" if environment == "preview" else "public"
     db.execute(text(f"SET search_path TO {schema_name}, public"))
-    print(f"🔧 Session schema set to: {schema_name}")
 
 def get_edit(db: Session, edit_id: int):
     set_schema_for_session(db)

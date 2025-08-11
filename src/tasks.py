@@ -10,8 +10,6 @@ backend_url = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 # Add environment prefix for Redis keys
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 redis_prefix = f"{ENVIRONMENT}:"
-print(f"🔧 Redis Environment: {ENVIRONMENT}")
-print(f"🔧 Redis Key Prefix: {redis_prefix}")
 
 # For rediss:// URLs, add the required SSL parameter that Celery expects
 if broker_url.startswith('rediss://'):
