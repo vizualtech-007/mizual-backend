@@ -7,7 +7,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@localh
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 
 # Add schema to connection based on environment
-schema_name = "preview" if ENVIRONMENT == "preview" else "production"
+schema_name = "preview" if ENVIRONMENT == "preview" else "public"
 connect_args = {
     "sslmode": "require",
     "options": f"-csearch_path={schema_name},public"
