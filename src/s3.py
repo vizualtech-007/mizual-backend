@@ -12,8 +12,6 @@ S3_SECRET_ACCESS_KEY = os.environ.get("S3_SECRET_ACCESS_KEY")
 # Environment-based folder structure
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 S3_FOLDER_PREFIX = f"{ENVIRONMENT}/"
-print(f"🔧 S3 Environment: {ENVIRONMENT}")
-print(f"🔧 S3 Folder Prefix: {S3_FOLDER_PREFIX}")
 
 s3_client = boto3.client(
     's3',

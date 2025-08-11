@@ -8,9 +8,6 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 
 # Add schema to connection based on environment
 schema_name = "preview" if ENVIRONMENT == "preview" else "public"
-print(f"🔧 Database Environment: {ENVIRONMENT}")
-print(f"🔧 Using schema: {schema_name}")
-
 connect_args = {
     "sslmode": "require",
     "options": f"-csearch_path={schema_name},public"
