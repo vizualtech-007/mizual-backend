@@ -9,6 +9,10 @@ S3_PUBLIC_URL = os.environ.get("S3_PUBLIC_URL", S3_ENDPOINT_URL)
 S3_ACCESS_KEY_ID = os.environ.get("S3_ACCESS_KEY_ID")
 S3_SECRET_ACCESS_KEY = os.environ.get("S3_SECRET_ACCESS_KEY")
 
+# Environment-based folder structure
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
+S3_FOLDER_PREFIX = f"{ENVIRONMENT}/"
+
 s3_client = boto3.client(
     's3',
     endpoint_url=S3_ENDPOINT_URL,
@@ -34,8 +38,10 @@ def create_bucket_if_not_exists():
 def upload_file_to_s3(file_bytes: bytes, file_name: str) -> str:
     """Uploads a file to S3 and returns its URL."""
     try:
-        s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=file_name, Body=file_bytes)
-        return f"{S3_PUBLIC_URL}/{S3_BUCKET_NAME}/{file_name}"
+        # Add environment prefix to file path
+        full_key = S3_FOLDER_PREFIX + file_name
+        s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=full_key, Body=file_bytes)
+        return f"{S3_PUBLIC_URL}/{S3_BUCKET_NAME}/{full_key}"
     except NoCredentialsError:
         raise Exception("AWS credentials not found. Please configure your environment.")
     except Exception as e:

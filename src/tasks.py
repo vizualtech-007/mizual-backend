@@ -7,6 +7,10 @@ import os
 broker_url = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/0")
 backend_url = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 
+# Add environment prefix for Redis keys
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
+redis_prefix = f"{ENVIRONMENT}:"
+
 # For rediss:// URLs, add the required SSL parameter that Celery expects
 if broker_url.startswith('rediss://'):
     broker_url = broker_url + ('&' if '?' in broker_url else '?') + 'ssl_cert_reqs=none'
