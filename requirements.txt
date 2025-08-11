@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+httpx
+boto3
+sqlalchemy
+psycopg2-binary
+celery
+redis
