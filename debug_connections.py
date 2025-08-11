@@ -1,16 +1,28 @@
 #!/usr/bin/env python3
 """
-Debug script to test all service connections on Render
+Debug script to test service connections with category support
 Run this to identify connection issues before starting the main app
+
+Usage:
+  python debug_connections.py                    # Test all connections
+  python debug_connections.py <category>         # Test specific category
+  python debug_connections.py --help             # Show help
+
+Categories: env, database, redis, storage, api
 """
 
 import os
 import sys
+import asyncio
 import psycopg2
 import redis
 import boto3
 from botocore.exceptions import ClientError
 import httpx
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 def print_header(title):
     print(f"\n{'='*50}")
@@ -27,6 +39,7 @@ def print_info(message):
     print(f"ℹ️  {message}")
 
 def test_environment_variables():
+    """Test environment variables"""
     print_header("ENVIRONMENT VARIABLES")
     
     required_vars = [
@@ -40,6 +53,7 @@ def test_environment_variables():
         'S3_SECRET_ACCESS_KEY'
     ]
     
+    all_present = True
     for var in required_vars:
         value = os.getenv(var)
         if value:
@@ -51,8 +65,12 @@ def test_environment_variables():
                 print_success(f"{var}: {value}")
         else:
             print_error(f"{var}: NOT SET")
+            all_present = False
+    
+    return all_present
 
 def test_database_connection():
+    """Test PostgreSQL connection"""
     print_header("DATABASE CONNECTION (PostgreSQL)")
     
     database_url = os.getenv('DATABASE_URL')
@@ -94,6 +112,7 @@ def test_database_connection():
         return False
 
 def test_redis_connection():
+    """Test Redis connection"""
     print_header("REDIS CONNECTION")
     
     broker_url = os.getenv('CELERY_BROKER_URL')
@@ -104,9 +123,21 @@ def test_redis_connection():
     print_info(f"Connecting to: {broker_url[:50]}...")
     
     try:
+        # Apply the same SSL handling as in tasks.py
+        test_broker_url = broker_url
+        if test_broker_url.startswith('rediss://'):
+            # Only add ssl_cert_reqs=none if it's not already present
+            if 'ssl_cert_reqs' not in test_broker_url:
+                test_broker_url = test_broker_url + ('&' if '?' in test_broker_url else '?') + 'ssl_cert_reqs=none'
+            else:
+                # Replace CERT_NONE with none (the format redis-py expects)
+                test_broker_url = test_broker_url.replace('ssl_cert_reqs=CERT_NONE', 'ssl_cert_reqs=none')
+        
+        print_info(f"Modified URL: {test_broker_url[:50]}...")
+        
         # Parse Redis URL (support both redis:// and rediss://)
-        if broker_url.startswith('redis://') or broker_url.startswith('rediss://'):
-            r = redis.from_url(broker_url, ssl_cert_reqs=None)
+        if test_broker_url.startswith('redis://') or test_broker_url.startswith('rediss://'):
+            r = redis.from_url(test_broker_url)
         else:
             print_error("Invalid Redis URL format")
             return False
@@ -128,6 +159,7 @@ def test_redis_connection():
         return False
 
 def test_s3_connection():
+    """Test S3 connection"""
     print_header("S3/BACKBLAZE B2 CONNECTION")
     
     bucket_name = os.getenv('S3_BUCKET_NAME')
@@ -171,56 +203,129 @@ def test_s3_connection():
         print_error(f"S3 connection failed: {str(e)}")
         return False
 
-def test_bfl_api():
+async def test_bfl_api():
+    """Test BFL API connection"""
     print_header("BFL API CONNECTION")
     
     api_key = os.getenv('BFL_API_KEY')
+    flux_api_url = os.getenv('FLUX_API_URL', 'https://api.bfl.ai/v1/flux-kontext-pro')
+    
     if not api_key:
         print_error("BFL_API_KEY not set")
         return False
     
     print_info(f"API Key: {api_key[:10]}...")
+    print_info(f"API URL: {flux_api_url}")
     
     try:
-        # Test BFL API endpoint
+        # Use the same headers as in flux_api.py
         headers = {
-            'Authorization': f'Bearer {api_key}',
-            'Content-Type': 'application/json'
+            "accept": "application/json",
+            "x-key": api_key,
+            "Content-Type": "application/json"
         }
         
-        # Simple API test (adjust URL as needed)
-        with httpx.Client() as client:
-            response = client.get(
-                'https://api.bfl.ai/v1/models',  # or appropriate test endpoint
+        # Create a minimal test payload (similar to actual usage)
+        test_data = {
+            "prompt": "test connection",
+            "input_image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",  # 1x1 transparent PNG
+            "safety_tolerance": 2
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                flux_api_url,
                 headers=headers,
-                timeout=10.0
+                json=test_data
             )
             
             if response.status_code == 200:
                 print_success("BFL API connection successful!")
+                response_data = response.json()
+                if response_data.get("id"):
+                    print_success(f"Got request ID: {response_data.get('id')}")
                 return True
+            elif response.status_code == 401:
+                print_error("BFL API authentication failed - check your API key")
+                return False
+            elif response.status_code == 400:
+                print_error("BFL API request format issue - but connection works")
+                print_info("This might be due to test data format, but API is reachable")
+                return True  # Connection works, just test data issue
             else:
                 print_error(f"BFL API returned status: {response.status_code}")
+                print_info(f"Response: {response.text[:200]}...")
                 return False
                 
     except Exception as e:
         print_error(f"BFL API connection failed: {str(e)}")
         return False
 
-def main():
+# Test categories
+CATEGORIES = {
+    "env": {
+        "name": "Environment Variables",
+        "test": test_environment_variables,
+        "async": False
+    },
+    "database": {
+        "name": "Database (PostgreSQL)",
+        "test": test_database_connection,
+        "async": False
+    },
+    "redis": {
+        "name": "Redis/Celery",
+        "test": test_redis_connection,
+        "async": False
+    },
+    "storage": {
+        "name": "S3/Backblaze B2 Storage",
+        "test": test_s3_connection,
+        "async": False
+    },
+    "api": {
+        "name": "BFL API",
+        "test": test_bfl_api,
+        "async": True
+    }
+}
+
+async def run_category(category_key):
+    """Run tests for a specific category"""
+    if category_key not in CATEGORIES:
+        print_error(f"Unknown category: {category_key}")
+        print_info(f"Available categories: {', '.join(CATEGORIES.keys())}")
+        return False
+    
+    category = CATEGORIES[category_key]
+    print_info(f"Testing {category['name']}...\n")
+    
+    if category['async']:
+        result = await category['test']()
+    else:
+        result = category['test']()
+    
+    if result:
+        print_success(f"🎉 {category['name']} test passed!")
+    else:
+        print_error(f"⚠️  {category['name']} test failed!")
+    
+    return result
+
+async def run_all_tests():
+    """Run all connection tests"""
     print_header("MIZUAL BACKEND CONNECTION DEBUG")
     print_info("Testing all service connections...")
     
-    results = {
-        'Environment Variables': True,  # Always run this
-        'Database': test_database_connection(),
-        'Redis': test_redis_connection(),
-        'S3/B2 Storage': test_s3_connection(),
-        'BFL API': test_bfl_api()
-    }
-    
-    # Test environment variables
-    test_environment_variables()
+    results = {}
+    for key, category in CATEGORIES.items():
+        print_info(f"Testing {category['name']}...")
+        if category['async']:
+            result = await category['test']()
+        else:
+            result = category['test']()
+        results[category['name']] = result
+        print()  # Add spacing between tests
     
     print_header("SUMMARY")
     all_passed = True
@@ -233,10 +338,43 @@ def main():
     
     if all_passed:
         print_success("\n🎉 All connections successful! Your app should start normally.")
-        sys.exit(0)
+        return True
     else:
         print_error("\n💥 Some connections failed. Fix these issues before starting the app.")
-        sys.exit(1)
+        return False
+
+def show_usage():
+    """Show usage instructions"""
+    print("Usage:")
+    print("  python debug_connections.py                    # Test all connections")
+    print("  python debug_connections.py <category>         # Test specific category")
+    print("  python debug_connections.py --help             # Show this help")
+    print()
+    print("Available categories:")
+    for key, category in CATEGORIES.items():
+        print(f"  {key:<10} - {category['name']}")
+    print()
+    print("Examples:")
+    print("  python debug_connections.py env               # Test only environment variables")
+    print("  python debug_connections.py database          # Test only database")
+    print("  python debug_connections.py storage           # Test only S3 storage")
+    print("  python debug_connections.py api               # Test only BFL API")
+
+async def main():
+    """Main function with category support"""
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].lower()
+        if arg in ["-h", "--help", "help"]:
+            show_usage()
+            return
+        
+        # Run specific category
+        success = await run_category(arg)
+        sys.exit(0 if success else 1)
+    else:
+        # Run all tests
+        success = await run_all_tests()
+        sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
