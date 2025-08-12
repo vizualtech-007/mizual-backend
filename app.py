@@ -3,14 +3,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from src import models, schemas, database, crud, s3, tasks
 from src.database import engine
 import uuid
 import base64
+import os
 
 models.Base.metadata.create_all(bind=engine)
 
+# Rate limiting configuration from environment variables
+RATE_LIMIT_DAILY_IMAGES = os.environ.get("RATE_LIMIT_DAILY_IMAGES", "3")
+RATE_LIMIT_BURST_SECONDS = os.environ.get("RATE_LIMIT_BURST_SECONDS", "10")
+RATE_LIMIT_STATUS_CHECKS_PER_MINUTE = os.environ.get("RATE_LIMIT_STATUS_CHECKS_PER_MINUTE", "30")
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI()
+
+# Add rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,6 +46,8 @@ def startup_event():
     print("Startup complete - database migrations skipped")
 
 @app.post("/edit-image/", response_model=schemas.EditCreateResponse)
+@limiter.limit(f"{RATE_LIMIT_DAILY_IMAGES}/day")  # Configurable daily limit per IP
+@limiter.limit(f"1/{RATE_LIMIT_BURST_SECONDS}seconds")  # Configurable burst protection per IP
 async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, db: Session = Depends(database.get_db)):
     try:
         # Decode the base64 image
@@ -59,7 +76,8 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     return {"edit_id": edit.uuid, "polling_url": polling_url}
 
 @app.get("/edit/{edit_uuid}", response_model=schemas.Edit)
-def get_edit_status(edit_uuid: str, db: Session = Depends(database.get_db)):
+@limiter.limit(f"{RATE_LIMIT_STATUS_CHECKS_PER_MINUTE}/minute")  # Configurable status check limit
+def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
     db_edit = crud.get_edit_by_uuid(db, edit_uuid=edit_uuid)
     if db_edit is None:
         raise HTTPException(status_code=404, detail="Edit not found")
