@@ -157,30 +157,35 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
                 max_tokens=200
             )
             
-            # Parse the response to extract the final prompt (same logic as simple_query_v2.py)
+            # Parse the response using exact same logic as simple_query_v2.py
             response_text = response.choices[0].message.content
             lines = response_text.split('\n')
+            
             final_prompt = None
+            in_prompt_section = False
+            in_code_block = False
             
             for i, line in enumerate(lines):
                 if 'STEP 3 - FINAL PROMPT:' in line or 'FINAL PROMPT:' in line:
+                    in_prompt_section = True
                     prompt_lines = []
                     # Collect lines after this, skipping markdown formatting
                     for j in range(i + 1, len(lines)):
                         current_line = lines[j].strip()
-                        
+
                         # Check for code block markers
                         if current_line == '```':
+                            in_code_block = not in_code_block
                             continue
-                        
+
                         # Skip empty lines and headers
                         if not current_line or current_line.startswith('#'):
                             continue
-                        
+
                         # Add non-empty lines that aren't markdown
                         if current_line and not current_line.startswith('```'):
                             prompt_lines.append(current_line)
-                    
+
                     if prompt_lines:
                         final_prompt = '\n'.join(prompt_lines)
                         break
