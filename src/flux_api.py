@@ -2,7 +2,6 @@ import httpx
 import os
 import base64
 import asyncio
-import time
 
 FLUX_API_URL = os.environ.get("FLUX_API_URL", "https://api.bfl.ai/v1/flux-kontext-pro")
 BFL_API_KEY = os.environ.get("BFL_API_KEY")

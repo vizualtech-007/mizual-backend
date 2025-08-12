@@ -11,6 +11,7 @@ class EditCreate(EditBase):
 
 class Edit(EditBase):
     uuid: uuid.UUID
+    enhanced_prompt: Optional[str] = None  # LLM-enhanced prompt
     original_image_url: str
     edited_image_url: Optional[str] = None
     status: str

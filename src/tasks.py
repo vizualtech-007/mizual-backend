@@ -10,6 +10,7 @@ backend_url = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 # Add environment prefix for Redis keys
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 redis_prefix = f"{ENVIRONMENT}:"
+print(f"Initializing Celery with environment: {ENVIRONMENT}, redis_prefix: {redis_prefix}")
 
 # For rediss:// URLs, add the required SSL parameter that Celery expects
 if broker_url.startswith('rediss://'):
@@ -29,30 +30,41 @@ def process_image_edit(edit_id: int):
     db = next(database.get_db())
     edit = crud.get_edit(db, edit_id)
     if not edit:
+        print(f"Edit {edit_id} not found")
         return
 
+    print(f"Processing edit {edit_id} with UUID {edit.uuid}")
     crud.update_edit_status(db, edit_id, "processing")
 
     try:
-        # Replace public hostname with internal Docker network hostname for image fetching.
+        # Determine which prompt to use (enhanced or original)
+        prompt_to_use = edit.enhanced_prompt if edit.enhanced_prompt else edit.prompt
+        print(f"Using prompt for processing: '{prompt_to_use}'")
+        
+        # Replace public hostname with internal Docker network hostname for image fetching
         internal_image_url = edit.original_image_url.replace("localhost", "minio")
+        print(f"Fetching image from: {internal_image_url}")
         
         import httpx
         response = httpx.get(internal_image_url)
         response.raise_for_status()
         image_bytes = response.content
+        print(f"Successfully fetched original image, size: {len(image_bytes)} bytes")
 
-        edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, edit.prompt))
+        print(f"Calling BFL API for edit {edit_id}")
+        edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, prompt_to_use))
+        print(f"BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
 
         edited_file_name = f"edited-{edit.uuid}.png"
         edited_image_url = s3.upload_file_to_s3(edited_image_bytes, edited_file_name)
+        print(f"Uploaded edited image to: {edited_image_url}")
 
         crud.update_edit_with_result(db, edit_id, "completed", edited_image_url)
+        print(f"Edit {edit_id} completed successfully")
 
     except Exception as e:
+        print(f"Error processing edit {edit_id}: {str(e)}")
         crud.update_edit_status(db, edit_id, "failed")
-        # Log error for debugging. Use structured logging in production.
-        print(f"Error processing edit {edit_id}: {e}")
     finally:
         db.close()
 
@@ -60,5 +72,6 @@ def process_image_edit(edit_id: int):
 @celery.task(name='src.tasks.process_image_edit')
 def process_image_edit_legacy(edit_id: int):
     """Legacy task name for old tasks in queue"""
+    print(f"Legacy task called for edit {edit_id}")
     return process_image_edit(edit_id)
 

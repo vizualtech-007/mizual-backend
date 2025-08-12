@@ -12,6 +12,14 @@ import uuid
 import base64
 import os
 
+# Import LLM provider factory
+try:
+    from src.llm import get_provider
+    LLM_AVAILABLE = True
+except ImportError:
+    LLM_AVAILABLE = False
+import os
+
 models.Base.metadata.create_all(bind=engine)
 
 # Rate limiting configuration from environment variables
@@ -56,20 +64,51 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image format: {e}")
 
+    print(f"Starting image edit process with prompt: '{edit_request.prompt}'")
+    
     original_file_name = f"original-{uuid.uuid4()}.png"
 
     try:
         original_image_url = s3.upload_file_to_s3(image_bytes, original_file_name)
+        print(f"Uploaded original image to: {original_image_url}")
     except Exception as e:
+        print(f"Failed to upload original image to S3: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to upload original image to S3: {e}")
 
+    # Try to enhance the prompt with LLM if available
+    enhanced_prompt = None
+    original_prompt = edit_request.prompt
+    
+    if LLM_AVAILABLE and os.environ.get("ENABLE_PROMPT_ENHANCEMENT", "true").lower() in ["true", "1", "yes"]:
+        try:
+            print("Attempting prompt enhancement with LLM")
+            llm_provider = get_provider()
+            if llm_provider:
+                enhanced_prompt = llm_provider.enhance_prompt(original_prompt, image_bytes)
+                print(f"Prompt enhanced: '{enhanced_prompt}'")
+        except Exception as e:
+            print(f"Error enhancing prompt: {str(e)}")
+            enhanced_prompt = None
+    
+    # Use enhanced prompt if available, otherwise use original
+    final_prompt = enhanced_prompt if enhanced_prompt else original_prompt
+    if enhanced_prompt:
+        print(f"Using enhanced prompt: '{final_prompt}'")
+    else:
+        print(f"Using original prompt: '{final_prompt}'")
+
+    # Create database record with both original and enhanced prompts
     edit = crud.create_edit(
         db=db,
-        prompt=edit_request.prompt,
+        prompt=original_prompt,
+        enhanced_prompt=enhanced_prompt,
         original_image_url=original_image_url
     )
 
+    # Process the image edit asynchronously with the final prompt
     tasks.process_image_edit.delay(edit.id)
+    
+    print(f"Edit request queued for processing with UUID: {edit.uuid}")
 
     polling_url = str(request.url_for('get_edit_status', edit_uuid=edit.uuid))
 

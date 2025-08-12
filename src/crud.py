@@ -17,10 +17,11 @@ def get_edit_by_uuid(db: Session, edit_uuid: str):
     set_schema_for_session(db)
     return db.query(models.Edit).filter(models.Edit.uuid == edit_uuid).first()
 
-def create_edit(db: Session, prompt: str, original_image_url: str):
+def create_edit(db: Session, prompt: str, original_image_url: str, enhanced_prompt: str = None):
     set_schema_for_session(db)
     db_edit = models.Edit(
         prompt=prompt,
+        enhanced_prompt=enhanced_prompt,
         original_image_url=original_image_url,
         status="pending"
     )

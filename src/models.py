@@ -9,6 +9,7 @@ class Edit(Base):
     id = Column(Integer, primary_key=True, index=True)
     uuid = Column(String, unique=True, index=True, default=lambda: str(uuid.uuid4()))
     prompt = Column(String, index=True)
+    enhanced_prompt = Column(String, nullable=True)  # Store LLM-enhanced prompt
     original_image_url = Column(String)
     edited_image_url = Column(String, nullable=True)
     status = Column(String, default="pending")
