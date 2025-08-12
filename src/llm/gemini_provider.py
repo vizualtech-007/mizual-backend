@@ -142,11 +142,15 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
                 system_prompt,
                 {"mime_type": "image/jpeg", "data": img_bytes}
             ]
-            
+            generation_config = {
+                "temperature": 0.1,  # Lower temperature for more deterministic output
+                "top_p": 0.95,  # Slightly reduced to balance speed and quality
+                "max_output_tokens": 2048,  # Enough for detailed response
+            }
             # Generate response with timeout
             response = self.model.generate_content(
                 prompt_parts,
-                generation_config={"temperature": 0.2, "max_output_tokens": 200},
+                generation_config=generation_config,
                 stream=False
             )
             
