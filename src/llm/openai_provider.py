@@ -166,7 +166,7 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
             in_code_block = False
             
             for i, line in enumerate(lines):
-                if 'STEP 3 - FINAL PROMPT:' in line or 'FINAL PROMPT:' in line:
+                if 'STEP 3 - FINAL PROMPT:' in line or 'FINAL PROMPT:' in line or '### STEP 3 - FINAL PROMPT:' in line:
                     in_prompt_section = True
                     prompt_lines = []
                     # Collect lines after this, skipping markdown formatting

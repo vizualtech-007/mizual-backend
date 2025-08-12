@@ -153,12 +153,6 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
             # Parse the response using exact same logic as simple_query_v2.py
             response_text = response.text
             
-            # TEMPORARY DEBUG - Print first few lines to see format
-            print(f"DEBUG: First 10 lines of Gemini response:")
-            debug_lines = response_text.split('\n')[:10]
-            for i, line in enumerate(debug_lines):
-                print(f"Line {i}: '{line.strip()}'")
-            
             lines = response_text.split('\n')
             
             final_prompt = None
