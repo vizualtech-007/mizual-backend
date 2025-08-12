@@ -85,7 +85,6 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
             llm_provider = get_provider()
             if llm_provider:
                 enhanced_prompt = llm_provider.enhance_prompt(original_prompt, image_bytes)
-                print(f"Prompt enhanced: '{enhanced_prompt}'")
         except Exception as e:
             print(f"Error enhancing prompt: {str(e)}")
             enhanced_prompt = None
@@ -93,9 +92,9 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     # Use enhanced prompt if available, otherwise use original
     final_prompt = enhanced_prompt if enhanced_prompt else original_prompt
     if enhanced_prompt:
-        print(f"Using enhanced prompt: '{final_prompt}'")
+        print(f"Using enhanced prompt for BFL")
     else:
-        print(f"Using original prompt: '{final_prompt}'")
+        print(f"Using original prompt for BFL")
 
     # Create database record with both original and enhanced prompts
     edit = crud.create_edit(
