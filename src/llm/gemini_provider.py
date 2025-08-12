@@ -8,12 +8,7 @@ import google.generativeai as genai
 from .base import BaseLLMProvider
 
 class GeminiProvider(BaseLLMProvider):
-    """
-    Google Gemini implementation of LLM Provider
-    Note:
-        Keep intact: ['weighing machine', 'container', 'powder'] ==> this gives better result
-        Keep intact: weighing machine, container, powder
-    """
+    """Google Gemini implementation of LLM Provider"""
     
     def __init__(self):
         """Initialize Gemini provider with API key and model"""
@@ -113,9 +108,16 @@ You are now an expert prompt engineer. Based on your validation result from Step
 *   Construct a "High-Fidelity" prompt using the detailed plan.
 *   **Format:**
     Line 1: "High-fidelity photographic edit of the provided image."
-    Line 2: "Subject to Preserve: [List the `component_parts` from the JSON plan]."
+    Line 2: "Subject to Preserve: " followed by the component_parts formatted exactly as a Python list (e.g., ['item1', 'item2', 'item3'] with square brackets and quotes)
     Line 3: "Edits to perform:"
     Following Lines: A numbered list of all instructions from `background_edit_instruction` and `detail_edit_instructions`.
+    
+    **Example output format:**
+    High-fidelity photographic edit of the provided image.
+    Subject to Preserve: ['drum', 'drummer', 'drumsticks', 'cymbal']
+    Edits to perform:
+    1. [background instruction here]
+    2. [detail instruction here if any]
 
 **IF the validation status is NO (FAILED):**
 *   The planner's analysis is unreliable. **IGNORE the `subject_to_preserve` description in the JSON plan.**
