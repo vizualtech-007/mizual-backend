@@ -146,6 +146,7 @@ class MigrationRunner:
             ('20241201_143000_add_feedback_system_env.sql', 'Feature 2: User Feedback System'),
             ('20241208_143000_add_processing_stage_env.sql', 'Feature 3: Progress Indicator'),
             ('20241215_143000_add_edit_chains_table_env.sql', 'Feature 1: Follow-up Image Editing'),
+            ('20241201_160000_update_feedback_to_thumbs.sql', 'Update: Thumbs Up/Down Feedback System'),
         ]
         
         pending = []

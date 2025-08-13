@@ -170,7 +170,7 @@ async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate, db
     if not db_feedback:
         raise HTTPException(status_code=500, detail="Failed to create feedback")
     
-    print(f"Feedback submitted for edit {feedback.edit_uuid}: {feedback.rating} stars")
+    print(f"Feedback submitted for edit {feedback.edit_uuid}: {feedback.rating}")
     if feedback.feedback_text:
         print(f"Feedback text: {feedback.feedback_text[:100]}...")  # Log first 100 chars
     

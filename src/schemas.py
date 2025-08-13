@@ -40,14 +40,21 @@ class EditCreateResponse(BaseModel):
 # Feedback Schemas
 class FeedbackBase(BaseModel):
     edit_uuid: str
-    rating: int = Field(..., ge=1, le=5, description="Rating from 1 to 5 stars")
-    feedback_text: Optional[str] = Field(None, max_length=1000, description="Optional feedback text")
+    rating: str = Field(..., regex="^(thumbs_up|thumbs_down)$", description="User feedback: thumbs_up or thumbs_down")
+    feedback_text: Optional[str] = Field(None, max_length=1000, description="Feedback text - required for thumbs_down")
 
 class FeedbackCreate(FeedbackBase):
     @validator('rating')
     def validate_rating(cls, v):
-        if v < 1 or v > 5:
-            raise ValueError('Rating must be between 1 and 5')
+        if v not in ['thumbs_up', 'thumbs_down']:
+            raise ValueError('Rating must be either thumbs_up or thumbs_down')
+        return v
+    
+    @validator('feedback_text')
+    def validate_feedback_text(cls, v, values):
+        # Require text feedback for thumbs_down
+        if values.get('rating') == 'thumbs_down' and not v:
+            raise ValueError('Feedback text is required when rating is thumbs_down')
         return v
 
 class Feedback(FeedbackBase):
