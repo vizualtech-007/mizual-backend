@@ -54,6 +54,7 @@ def startup_event():
     print("Startup complete - database migrations skipped")
 
 @app.get("/health")
+@app.head("/health")
 def health_check():
     """Health check endpoint for monitoring and load balancers"""
     return {"status": "ok", "message": "Service is running"}
