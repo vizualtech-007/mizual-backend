@@ -2,7 +2,7 @@ services:
   - type: web
     name: mizual-backend
     env: python
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: "pip install -r requirements.txt && python migrate.py"
     startCommand: "python debug_connections.py"
     plan: free
     envVars:
