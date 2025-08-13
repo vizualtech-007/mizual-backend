@@ -69,3 +69,27 @@ class FeedbackResponse(BaseModel):
     success: bool
     message: str
     feedback_id: Optional[int] = None
+
+# Edit Chain Schemas
+class EditChainBase(BaseModel):
+    edit_uuid: str
+    parent_edit_uuid: Optional[str] = None
+    chain_position: int
+
+class EditChain(EditChainBase):
+    id: int
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+class EditChainHistory(BaseModel):
+    """Complete chain history for an edit"""
+    edit: Edit
+    chain_position: int
+    parent_edit_uuid: Optional[str] = None
+
+class ChainStats(BaseModel):
+    """Analytics about edit chains"""
+    total_chains: int
+    average_chain_length: float

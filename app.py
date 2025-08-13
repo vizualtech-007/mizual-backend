@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from pydantic import BaseModel
+from typing import Optional
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -46,6 +47,7 @@ app.add_middleware(
 class EditImageRequest(BaseModel):
     prompt: str
     image: str
+    parent_edit_uuid: Optional[str] = None  # For follow-up editing
 
 @app.on_event("startup")
 def startup_event():
@@ -63,14 +65,33 @@ def health_check():
 @limiter.limit(f"{RATE_LIMIT_DAILY_IMAGES}/day")  # Configurable daily limit per IP
 @limiter.limit(f"1/{RATE_LIMIT_BURST_SECONDS}seconds")  # Configurable burst protection per IP
 async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, db: Session = Depends(database.get_db)):
+    # Validate follow-up editing if parent_edit_uuid is provided
+    if edit_request.parent_edit_uuid:
+        # Check if parent edit exists
+        parent_edit = crud.get_edit_by_uuid(db, edit_request.parent_edit_uuid)
+        if not parent_edit:
+            raise HTTPException(status_code=404, detail="Parent edit not found")
+        
+        # Check if parent edit is completed
+        if parent_edit.status != "completed":
+            raise HTTPException(status_code=400, detail=f"Parent edit is {parent_edit.status}, cannot continue from incomplete edit")
+        
+        # Validate chain length
+        chain_length = crud.validate_chain_length(db, edit_request.parent_edit_uuid)
+        if chain_length == -1:
+            raise HTTPException(status_code=400, detail="Maximum chain length of 5 edits reached")
+        
+        print(f"Starting follow-up edit (chain position {chain_length + 1}) with prompt: '{edit_request.prompt}'")
+        print(f"Parent edit: {edit_request.parent_edit_uuid}")
+    else:
+        print(f"Starting new edit with prompt: '{edit_request.prompt}'")
+
     try:
         # Decode the base64 image
         header, encoded_image = edit_request.image.split(",", 1)
         image_bytes = base64.b64decode(encoded_image)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image format: {e}")
-
-    print(f"Starting image edit process with prompt: '{edit_request.prompt}'")
     
     original_file_name = f"original-{uuid.uuid4()}.png"
 
@@ -107,7 +128,8 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         db=db,
         prompt=original_prompt,
         enhanced_prompt=enhanced_prompt,
-        original_image_url=original_image_url
+        original_image_url=original_image_url,
+        parent_edit_uuid=edit_request.parent_edit_uuid
     )
 
     # Process the image edit asynchronously with the final prompt
@@ -197,4 +219,35 @@ async def get_feedback_for_edit(request: Request, edit_uuid: str, db: Session = 
         raise HTTPException(status_code=404, detail="No feedback found for this edit")
     
     return feedback
+
+@app.get("/chain/{edit_uuid}")
+@limiter.limit("10/minute")  # Allow checking chain history
+async def get_edit_chain_history(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
+    """Get the complete chain history for an edit"""
+    
+    # Validate that the edit exists
+    edit = crud.get_edit_by_uuid(db, edit_uuid)
+    if not edit:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    
+    # Get chain history
+    chain_history = crud.get_edit_chain_history(db, edit_uuid)
+    
+    return {
+        "edit_uuid": edit_uuid,
+        "chain_length": len(chain_history),
+        "chain_history": chain_history
+    }
+
+@app.get("/analytics/chains")
+@limiter.limit("5/minute")  # Analytics endpoint
+async def get_chain_analytics(request: Request, db: Session = Depends(database.get_db)):
+    """Get analytics about edit chains"""
+    
+    stats = crud.get_chain_stats(db)
+    
+    return {
+        "success": True,
+        "analytics": stats
+    }
 

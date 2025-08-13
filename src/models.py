@@ -25,3 +25,12 @@ class EditFeedback(Base):
     feedback_text = Column(Text, nullable=True)  # Optional for thumbs up, required for thumbs down
     user_ip = Column(String, nullable=True)  # For analytics
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class EditChain(Base):
+    __tablename__ = "edit_chains"
+
+    id = Column(Integer, primary_key=True, index=True)
+    edit_uuid = Column(String, nullable=False)  # Current edit UUID
+    parent_edit_uuid = Column(String, nullable=True)  # Parent edit UUID (null for first edit)
+    chain_position = Column(Integer, nullable=False, default=1)  # Position in chain (1, 2, 3, etc.)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
