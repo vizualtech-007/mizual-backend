@@ -53,6 +53,11 @@ def startup_event():
     # Skip database migrations for now - tables are already properly set up
     print("Startup complete - database migrations skipped")
 
+@app.get("/health")
+def health_check():
+    """Health check endpoint for monitoring and load balancers"""
+    return {"status": "ok", "message": "Service is running"}
+
 @app.post("/edit-image/", response_model=schemas.EditCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_DAILY_IMAGES}/day")  # Configurable daily limit per IP
 @limiter.limit(f"1/{RATE_LIMIT_BURST_SECONDS}seconds")  # Configurable burst protection per IP
