@@ -34,7 +34,11 @@ def process_image_edit(edit_id: int):
         return
 
     print(f"Processing edit {edit_id} with UUID {edit.uuid}")
+    
+    # Stage 1: Processing started
     crud.update_edit_status(db, edit_id, "processing")
+    crud.update_edit_processing_stage(db, edit_id, "processing_image")
+    print(f"Stage: processing_image - Starting image processing for edit {edit_id}")
 
     try:
         # Determine which prompt to use (enhanced or original)
@@ -55,16 +59,24 @@ def process_image_edit(edit_id: int):
         edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, prompt_to_use))
         print(f"BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
 
+        # Stage 2: Uploading result
+        crud.update_edit_processing_stage(db, edit_id, "uploading_result")
+        print(f"Stage: uploading_result - Uploading edited image for edit {edit_id}")
+
         edited_file_name = f"edited-{edit.uuid}.png"
         edited_image_url = s3.upload_file_to_s3(edited_image_bytes, edited_file_name)
         print(f"Uploaded edited image to: {edited_image_url}")
 
+        # Stage 3: Completed
         crud.update_edit_with_result(db, edit_id, "completed", edited_image_url)
-        print(f"Edit {edit_id} completed successfully")
+        crud.update_edit_processing_stage(db, edit_id, "completed")
+        print(f"Stage: completed - Edit {edit_id} completed successfully")
 
     except Exception as e:
         print(f"Error processing edit {edit_id}: {str(e)}")
         crud.update_edit_status(db, edit_id, "failed")
+        crud.update_edit_processing_stage(db, edit_id, "failed")
+        print(f"Stage: failed - Edit {edit_id} failed with error: {str(e)}")
     finally:
         db.close()
 

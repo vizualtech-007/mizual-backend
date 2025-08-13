@@ -21,6 +21,19 @@ class Edit(EditBase):
     class Config:
         from_attributes = True
 
+class EditStatusResponse(BaseModel):
+    """Enhanced status response with progress information"""
+    uuid: uuid.UUID
+    status: str
+    processing_stage: Optional[str] = None
+    message: str
+    progress_percent: int
+    estimated_time_remaining: str
+    is_complete: bool
+    is_error: bool
+    edited_image_url: Optional[str] = None
+    created_at: datetime.datetime
+
 class EditCreateResponse(BaseModel):
     edit_id: uuid.UUID
     polling_url: str

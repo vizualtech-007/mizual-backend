@@ -119,13 +119,31 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
 
     return {"edit_id": edit.uuid, "polling_url": polling_url}
 
-@app.get("/edit/{edit_uuid}", response_model=schemas.Edit)
+@app.get("/edit/{edit_uuid}", response_model=schemas.EditStatusResponse)
 @limiter.limit(f"{RATE_LIMIT_STATUS_CHECKS_PER_MINUTE}/minute")  # Configurable status check limit
 def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
+    from src.status_messages import get_status_message, get_estimated_time_remaining
+    
     db_edit = crud.get_edit_by_uuid(db, edit_uuid=edit_uuid)
     if db_edit is None:
         raise HTTPException(status_code=404, detail="Edit not found")
-    return db_edit
+    
+    # Get user-friendly progress information
+    progress_info = get_status_message(db_edit.status, db_edit.processing_stage)
+    estimated_time = get_estimated_time_remaining(db_edit.processing_stage or db_edit.status)
+    
+    return {
+        "uuid": db_edit.uuid,
+        "status": db_edit.status,
+        "processing_stage": db_edit.processing_stage,
+        "message": progress_info["message"],
+        "progress_percent": progress_info["progress_percent"],
+        "estimated_time_remaining": estimated_time,
+        "is_complete": progress_info["is_complete"],
+        "is_error": progress_info["is_error"],
+        "edited_image_url": db_edit.edited_image_url,
+        "created_at": db_edit.created_at
+    }
 
 @app.post("/feedback/", response_model=schemas.FeedbackResponse)
 @limiter.limit("5/minute")  # Limit feedback submissions to prevent spam
