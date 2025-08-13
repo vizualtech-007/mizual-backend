@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# Run database migrations first
+echo "🔄 Running database migrations..."
+python migrate.py
+if [ $? -ne 0 ]; then
+    echo "❌ Database migration failed. Exiting."
+    exit 1
+fi
+echo "✅ Database migrations completed"
+
 # Start Celery worker in background
 echo "🚀 Starting Celery worker..."
 celery -A src.tasks.celery worker --loglevel=info --concurrency=1 &
