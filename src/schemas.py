@@ -28,7 +28,6 @@ class EditStatusResponse(BaseModel):
     processing_stage: Optional[str] = None
     message: str
     progress_percent: int
-    estimated_time_remaining: str
     is_complete: bool
     is_error: bool
     edited_image_url: Optional[str] = None
