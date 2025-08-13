@@ -121,3 +121,57 @@ def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(data
         raise HTTPException(status_code=404, detail="Edit not found")
     return db_edit
 
+@app.post("/feedback/", response_model=schemas.FeedbackResponse)
+@limiter.limit("5/minute")  # Limit feedback submissions to prevent spam
+async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate, db: Session = Depends(database.get_db)):
+    """Submit feedback for an edit result"""
+    
+    # Get user IP for analytics
+    user_ip = get_remote_address(request)
+    
+    # Validate that the edit exists
+    edit = crud.get_edit_by_uuid(db, feedback.edit_uuid)
+    if not edit:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    
+    # Check if edit is completed (can only give feedback on completed edits)
+    if edit.status != "completed":
+        raise HTTPException(status_code=400, detail="Can only provide feedback for completed edits")
+    
+    # Check if feedback already exists for this edit
+    if crud.feedback_exists_for_edit(db, feedback.edit_uuid):
+        raise HTTPException(status_code=409, detail="Feedback already submitted for this edit")
+    
+    # Create the feedback
+    db_feedback = crud.create_feedback(db=db, feedback=feedback, user_ip=user_ip)
+    
+    if not db_feedback:
+        raise HTTPException(status_code=500, detail="Failed to create feedback")
+    
+    print(f"Feedback submitted for edit {feedback.edit_uuid}: {feedback.rating} stars")
+    if feedback.feedback_text:
+        print(f"Feedback text: {feedback.feedback_text[:100]}...")  # Log first 100 chars
+    
+    return {
+        "success": True,
+        "message": "Thank you for your feedback!",
+        "feedback_id": db_feedback.id
+    }
+
+@app.get("/feedback/{edit_uuid}", response_model=schemas.Feedback)
+@limiter.limit("10/minute")  # Allow checking feedback status
+async def get_feedback_for_edit(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
+    """Get feedback for a specific edit (optional endpoint for checking if feedback exists)"""
+    
+    # Validate that the edit exists
+    edit = crud.get_edit_by_uuid(db, edit_uuid)
+    if not edit:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    
+    # Get feedback for this edit
+    feedback = crud.get_feedback_by_edit_uuid(db, edit_uuid)
+    if not feedback:
+        raise HTTPException(status_code=404, detail="No feedback found for this edit")
+    
+    return feedback
+

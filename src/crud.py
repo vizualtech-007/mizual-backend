@@ -48,3 +48,55 @@ def update_edit_with_result(db: Session, edit_id: int, status: str, edited_image
         db.commit()
         db.refresh(db_edit)
     return db_edit
+
+def update_edit_processing_stage(db: Session, edit_id: int, processing_stage: str):
+    """Update the processing stage for better progress tracking"""
+    set_schema_for_session(db)
+    db_edit = get_edit(db, edit_id)
+    if db_edit:
+        db_edit.processing_stage = processing_stage
+        db.commit()
+        db.refresh(db_edit)
+    return db_edit
+
+# Feedback CRUD Operations
+def create_feedback(db: Session, feedback: schemas.FeedbackCreate, user_ip: str = None):
+    """Create feedback for an edit"""
+    set_schema_for_session(db)
+    
+    # Check if edit exists
+    edit = get_edit_by_uuid(db, feedback.edit_uuid)
+    if not edit:
+        return None
+    
+    # Check if feedback already exists for this edit
+    existing_feedback = get_feedback_by_edit_uuid(db, feedback.edit_uuid)
+    if existing_feedback:
+        return None  # Feedback already exists
+    
+    db_feedback = models.EditFeedback(
+        edit_uuid=feedback.edit_uuid,
+        rating=feedback.rating,
+        feedback_text=feedback.feedback_text,
+        user_ip=user_ip
+    )
+    db.add(db_feedback)
+    db.commit()
+    db.refresh(db_feedback)
+    return db_feedback
+
+def get_feedback_by_edit_uuid(db: Session, edit_uuid: str):
+    """Get feedback for a specific edit"""
+    set_schema_for_session(db)
+    return db.query(models.EditFeedback).filter(models.EditFeedback.edit_uuid == edit_uuid).first()
+
+def get_feedback_by_id(db: Session, feedback_id: int):
+    """Get feedback by ID"""
+    set_schema_for_session(db)
+    return db.query(models.EditFeedback).filter(models.EditFeedback.id == feedback_id).first()
+
+def feedback_exists_for_edit(db: Session, edit_uuid: str) -> bool:
+    """Check if feedback already exists for an edit"""
+    set_schema_for_session(db)
+    feedback = db.query(models.EditFeedback).filter(models.EditFeedback.edit_uuid == edit_uuid).first()
+    return feedback is not None
