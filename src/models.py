@@ -21,7 +21,7 @@ class EditFeedback(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     edit_uuid = Column(String, nullable=False, unique=True)  # One feedback per edit
-    rating = Column(String, nullable=False)  # 'thumbs_up' or 'thumbs_down'
-    feedback_text = Column(Text, nullable=True)  # Optional for thumbs_up, required for thumbs_down
+    rating = Column(Integer, nullable=False)  # 0 for thumbs down, 1 for thumbs up
+    feedback_text = Column(Text, nullable=True)  # Optional for thumbs up, required for thumbs down
     user_ip = Column(String, nullable=True)  # For analytics
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
