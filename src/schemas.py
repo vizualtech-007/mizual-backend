@@ -89,7 +89,3 @@ class EditChainHistory(BaseModel):
     chain_position: int
     parent_edit_uuid: Optional[str] = None
 
-class ChainStats(BaseModel):
-    """Analytics about edit chains"""
-    total_chains: int
-    average_chain_length: float

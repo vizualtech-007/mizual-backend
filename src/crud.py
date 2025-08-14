@@ -186,21 +186,3 @@ def get_edit_chain_history(db: Session, edit_uuid: str):
     # Reverse to get chronological order (first edit first)
     return list(reversed(chain))
 
-def get_chain_stats(db: Session):
-    """Get analytics about edit chains"""
-    set_schema_for_session(db)
-    
-    # Count total chains
-    total_chains = db.query(models.EditChain).count()
-    
-    # Get average chain length
-    if total_chains > 0:
-        max_positions = db.query(models.EditChain.chain_position).all()
-        avg_length = sum(pos[0] for pos in max_positions) / len(max_positions)
-    else:
-        avg_length = 0
-    
-    return {
-        'total_chains': total_chains,
-        'average_chain_length': round(avg_length, 2)
-    }

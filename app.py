@@ -239,15 +239,4 @@ async def get_edit_chain_history(request: Request, edit_uuid: str, db: Session =
         "chain_history": chain_history
     }
 
-@app.get("/analytics/chains")
-@limiter.limit("5/minute")  # Analytics endpoint
-async def get_chain_analytics(request: Request, db: Session = Depends(database.get_db)):
-    """Get analytics about edit chains"""
-    
-    stats = crud.get_chain_stats(db)
-    
-    return {
-        "success": True,
-        "analytics": stats
-    }
 
