@@ -28,85 +28,85 @@ celery = Celery(
 @celery.task(name='tasks.process_image_edit', bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 30}, soft_time_limit=120, time_limit=130)
 def process_image_edit(self, edit_id: int):
     retry_count = self.request.retries
-    print(f"🔄 CELERY TASK STARTED: process_image_edit for edit_id={edit_id} (attempt {retry_count + 1}/4)")
+    print(f"CELERY TASK STARTED: process_image_edit for edit_id={edit_id} (attempt {retry_count + 1}/4)")
     
     db = next(database.get_db())
     edit = crud.get_edit(db, edit_id)
     if not edit:
-        print(f"❌ TASK ERROR: Edit {edit_id} not found in database")
+        print(f"TASK ERROR: Edit {edit_id} not found in database")
         return
 
-    print(f"✅ TASK PROCESSING: Edit {edit_id} with UUID {edit.uuid}")
-    print(f"📝 Original prompt: '{edit.prompt}'")
-    print(f"🤖 Enhanced prompt: '{edit.enhanced_prompt}'")
+    print(f"TASK PROCESSING: Edit {edit_id} with UUID {edit.uuid}")
+    print(f"Original prompt: '{edit.prompt}'")
+    print(f"Enhanced prompt: '{edit.enhanced_prompt}'")
     
     try:
         # Stage 1: Processing started
-        print(f"🔄 UPDATING STATUS: edit_id={edit_id} to processing")
+        print(f"UPDATING STATUS: edit_id={edit_id} to processing")
         crud.update_edit_status(db, edit_id, "processing")
         crud.update_edit_processing_stage(db, edit_id, "processing_image")
-        print(f"✅ STATUS UPDATED: processing_image stage for edit {edit_id}")
+        print(f"STATUS UPDATED: processing_image stage for edit {edit_id}")
 
         # Determine which prompt to use (enhanced or original)
         prompt_to_use = edit.enhanced_prompt if edit.enhanced_prompt else edit.prompt
-        print(f"🎯 Using prompt for BFL API: '{prompt_to_use[:100]}...'")
+        print(f"Using prompt for BFL API: '{prompt_to_use[:100]}...'")
         
         # Use the original image URL directly (no localhost replacement needed)
         image_url = edit.original_image_url
-        print(f"🖼️  Fetching image from: {image_url}")
+        print(f"Fetching image from: {image_url}")
         
         import httpx
-        print(f"🌐 Making HTTP request to fetch image...")
+        print(f"Making HTTP request to fetch image...")
         response = httpx.get(image_url, timeout=30.0)
         response.raise_for_status()
         image_bytes = response.content
-        print(f"✅ Successfully fetched original image, size: {len(image_bytes)} bytes")
+        print(f"Successfully fetched original image, size: {len(image_bytes)} bytes")
 
-        print(f"🤖 Calling BFL API for edit {edit_id}")
+        print(f"Calling BFL API for edit {edit_id}")
         edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, prompt_to_use))
-        print(f"✅ BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
+        print(f"BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
 
         # Stage 2: Uploading result
-        print(f"🔄 UPDATING STAGE: uploading_result for edit {edit_id}")
+        print(f"UPDATING STAGE: uploading_result for edit {edit_id}")
         crud.update_edit_processing_stage(db, edit_id, "uploading_result")
-        print(f"📤 Uploading edited image to S3 for edit {edit_id}")
+        print(f"Uploading edited image to S3 for edit {edit_id}")
 
         edited_file_name = f"edited-{edit.uuid}.png"
         edited_image_url = s3.upload_file_to_s3(edited_image_bytes, edited_file_name)
-        print(f"✅ Uploaded edited image to: {edited_image_url}")
+        print(f"Uploaded edited image to: {edited_image_url}")
 
         # Stage 3: Completed
-        print(f"🔄 UPDATING STATUS: edit_id={edit_id} to completed")
+        print(f"UPDATING STATUS: edit_id={edit_id} to completed")
         crud.update_edit_with_result(db, edit_id, "completed", edited_image_url)
         crud.update_edit_processing_stage(db, edit_id, "completed")
-        print(f"🎉 TASK COMPLETED: Edit {edit_id} completed successfully")
+        print(f"TASK COMPLETED: Edit {edit_id} completed successfully")
 
     except Exception as e:
         retry_count = self.request.retries
         max_retries = self.retry_kwargs.get('max_retries', 3)
         
-        print(f"❌ TASK ERROR: Error processing edit {edit_id}: {str(e)}")
-        print(f"❌ ERROR TYPE: {type(e).__name__}")
-        print(f"❌ ERROR DETAILS: {repr(e)}")
-        print(f"🔄 RETRY INFO: Attempt {retry_count + 1}/{max_retries + 1}")
+        print(f"TASK ERROR: Error processing edit {edit_id}: {str(e)}")
+        print(f"ERROR TYPE: {type(e).__name__}")
+        print(f"ERROR DETAILS: {repr(e)}")
+        print(f"RETRY INFO: Attempt {retry_count + 1}/{max_retries + 1}")
         
         # Only mark as failed if we've exhausted all retries
         if retry_count >= max_retries:
-            print(f"❌ MAX RETRIES REACHED: Marking edit {edit_id} as failed after {max_retries + 1} attempts")
+            print(f"MAX RETRIES REACHED: Marking edit {edit_id} as failed after {max_retries + 1} attempts")
             try:
                 crud.update_edit_status(db, edit_id, "failed")
                 crud.update_edit_processing_stage(db, edit_id, "failed")
-                print(f"✅ STATUS UPDATED: Edit {edit_id} marked as failed")
+                print(f"STATUS UPDATED: Edit {edit_id} marked as failed")
             except Exception as update_error:
-                print(f"❌ CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
+                print(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
         else:
-            print(f"🔄 RETRYING: Will retry edit {edit_id} in 30 seconds (attempt {retry_count + 2}/{max_retries + 1})")
+            print(f"RETRYING: Will retry edit {edit_id} in 30 seconds (attempt {retry_count + 2}/{max_retries + 1})")
         
         # Re-raise the exception to trigger Celery's retry mechanism
         raise
             
     finally:
-        print(f"🔚 TASK FINISHED: Closing database connection for edit {edit_id}")
+        print(f"TASK FINISHED: Closing database connection for edit {edit_id}")
         db.close()
 
 # Register the same function with the old name for backward compatibility with old tasks in queue
