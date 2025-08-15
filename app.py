@@ -61,6 +61,51 @@ def health_check():
     """Health check endpoint for monitoring and load balancers"""
     return {"status": "ok", "message": "Service is running"}
 
+@app.get("/health/celery")
+@limiter.limit("10/minute")
+async def celery_health_check(request: Request):
+    """Health check endpoint for Celery worker connectivity"""
+    try:
+        from src.tasks import celery
+        
+        # Check if workers are available
+        inspect = celery.control.inspect()
+        active_workers = inspect.active()
+        
+        if active_workers:
+            worker_count = len(active_workers)
+            worker_names = list(active_workers.keys())
+            
+            # Get worker stats
+            stats = inspect.stats()
+            
+            return {
+                "status": "healthy",
+                "message": "Celery workers are connected and active",
+                "worker_count": worker_count,
+                "workers": worker_names,
+                "redis_connection": "ok",
+                "stats": stats
+            }
+        else:
+            return {
+                "status": "unhealthy",
+                "message": "No active Celery workers found",
+                "worker_count": 0,
+                "workers": [],
+                "redis_connection": "unknown"
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to check Celery health: {str(e)}",
+            "error_type": type(e).__name__,
+            "worker_count": 0,
+            "workers": [],
+            "redis_connection": "failed"
+        }
+
 @app.post("/edit-image/", response_model=schemas.EditCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_DAILY_IMAGES}/day")  # Configurable daily limit per IP
 @limiter.limit(f"1/{RATE_LIMIT_BURST_SECONDS}seconds")  # Configurable burst protection per IP

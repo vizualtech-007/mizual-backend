@@ -25,9 +25,10 @@ celery = Celery(
     backend=backend_url
 )
 
-@celery.task(name='tasks.process_image_edit')
-def process_image_edit(edit_id: int):
-    print(f"🔄 CELERY TASK STARTED: process_image_edit for edit_id={edit_id}")
+@celery.task(name='tasks.process_image_edit', bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 30}, soft_time_limit=120, time_limit=130)
+def process_image_edit(self, edit_id: int):
+    retry_count = self.request.retries
+    print(f"🔄 CELERY TASK STARTED: process_image_edit for edit_id={edit_id} (attempt {retry_count + 1}/4)")
     
     db = next(database.get_db())
     edit = crud.get_edit(db, edit_id)
@@ -81,16 +82,28 @@ def process_image_edit(edit_id: int):
         print(f"🎉 TASK COMPLETED: Edit {edit_id} completed successfully")
 
     except Exception as e:
+        retry_count = self.request.retries
+        max_retries = self.retry_kwargs.get('max_retries', 3)
+        
         print(f"❌ TASK ERROR: Error processing edit {edit_id}: {str(e)}")
         print(f"❌ ERROR TYPE: {type(e).__name__}")
         print(f"❌ ERROR DETAILS: {repr(e)}")
+        print(f"🔄 RETRY INFO: Attempt {retry_count + 1}/{max_retries + 1}")
         
-        try:
-            crud.update_edit_status(db, edit_id, "failed")
-            crud.update_edit_processing_stage(db, edit_id, "failed")
-            print(f"✅ STATUS UPDATED: Edit {edit_id} marked as failed")
-        except Exception as update_error:
-            print(f"❌ CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
+        # Only mark as failed if we've exhausted all retries
+        if retry_count >= max_retries:
+            print(f"❌ MAX RETRIES REACHED: Marking edit {edit_id} as failed after {max_retries + 1} attempts")
+            try:
+                crud.update_edit_status(db, edit_id, "failed")
+                crud.update_edit_processing_stage(db, edit_id, "failed")
+                print(f"✅ STATUS UPDATED: Edit {edit_id} marked as failed")
+            except Exception as update_error:
+                print(f"❌ CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
+        else:
+            print(f"🔄 RETRYING: Will retry edit {edit_id} in 30 seconds (attempt {retry_count + 2}/{max_retries + 1})")
+        
+        # Re-raise the exception to trigger Celery's retry mechanism
+        raise
             
     finally:
         print(f"🔚 TASK FINISHED: Closing database connection for edit {edit_id}")
