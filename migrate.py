@@ -28,8 +28,8 @@ class MigrationRunner:
         self.environment = os.getenv('ENVIRONMENT', 'production')
         self.schema = 'preview' if self.environment == 'preview' else 'public'
         
-        logger.info(f"🌍 Environment: {self.environment}")
-        logger.info(f"📊 Target schema: {self.schema}")
+        logger.info(f"Environment: {self.environment}")
+        logger.info(f"Target schema: {self.schema}")
         
         # Find migrations directory
         self.migrations_dir = Path(__file__).parent / 'migrations'
@@ -61,10 +61,10 @@ class MigrationRunner:
             result = subprocess.run([
                 'psql', self.database_url, '-c', sql
             ], capture_output=True, text=True, check=True)
-            logger.info(f"✅ Migration tracking table ready in {self.schema} schema")
+            logger.info(f"Migration tracking table ready in {self.schema} schema")
             return True
         except subprocess.CalledProcessError as e:
-            logger.error(f"❌ Failed to create migration tracking table: {e.stderr}")
+            logger.error(f"Failed to create migration tracking table: {e.stderr}")
             return False
     
     def is_migration_applied(self, migration_name: str) -> bool:
@@ -103,12 +103,12 @@ class MigrationRunner:
         
         # Check if already applied
         if self.is_migration_applied(migration_name):
-            logger.info(f"⏭️  Skipping {migration_name} (already applied)")
+            logger.info(f"Skipping {migration_name} (already applied)")
             return True
         
-        logger.info(f"🔄 Running: {description}")
-        logger.info(f"📁 File: {migration_name}")
-        logger.info(f"🎯 Target schema: {self.schema}")
+        logger.info(f"Running: {description}")
+        logger.info(f"File: {migration_name}")
+        logger.info(f"Target schema: {self.schema}")
         
         try:
             # Read migration file and replace TARGET_SCHEMA placeholder
@@ -125,18 +125,18 @@ class MigrationRunner:
             
             # Mark as successful
             self.mark_migration_applied(migration_name, True)
-            logger.info(f"✅ Success: {description}")
+            logger.info(f"Success: {description}")
             return True
             
         except subprocess.CalledProcessError as e:
-            logger.error(f"❌ Failed: {description}")
+            logger.error(f"Failed: {description}")
             logger.error(f"Error output: {e.stderr}")
             
             # Mark as failed
             self.mark_migration_applied(migration_name, False)
             return False
         except Exception as e:
-            logger.error(f"❌ Failed to read migration file: {str(e)}")
+            logger.error(f"Failed to read migration file: {str(e)}")
             self.mark_migration_applied(migration_name, False)
             return False
     
@@ -156,18 +156,18 @@ class MigrationRunner:
                 if not self.is_migration_applied(filename):
                     pending.append((file_path, description))
             else:
-                logger.warning(f"⚠️  Migration file not found: {filename}")
+                logger.warning(f"Migration file not found: {filename}")
         
         return pending
     
     def run_all_migrations(self) -> bool:
         """Run all pending migrations"""
-        logger.info("🚀 Starting Mizual Database Migrations")
+        logger.info("Starting Mizual Database Migrations")
         logger.info("=" * 50)
         
         # Check prerequisites
         if not self.check_psql_available():
-            logger.error("❌ psql command not available. Install postgresql-client.")
+            logger.error("psql command not available. Install postgresql-client.")
             return False
         
         # Create migration tracking table
@@ -178,19 +178,19 @@ class MigrationRunner:
         pending_migrations = self.get_pending_migrations()
         
         if not pending_migrations:
-            logger.info("✅ No pending migrations. Database is up to date!")
+            logger.info("No pending migrations. Database is up to date!")
             return True
         
-        logger.info(f"📋 Found {len(pending_migrations)} pending migrations")
+        logger.info(f"Found {len(pending_migrations)} pending migrations")
         
         # Run each migration
         for file_path, description in pending_migrations:
             success = self.run_migration_file(file_path, description)
             if not success:
-                logger.error("❌ Migration failed. Stopping.")
+                logger.error("Migration failed. Stopping.")
                 return False
         
-        logger.info("🎉 All migrations completed successfully!")
+        logger.info("All migrations completed successfully!")
         return True
 
 def main():
@@ -200,14 +200,14 @@ def main():
         success = runner.run_all_migrations()
         
         if success:
-            logger.info("✅ Database migration completed successfully")
+            logger.info("Database migration completed successfully")
             sys.exit(0)
         else:
-            logger.error("❌ Database migration failed")
+            logger.error("Database migration failed")
             sys.exit(1)
             
     except Exception as e:
-        logger.error(f"❌ Migration error: {str(e)}")
+        logger.error(f"Migration error: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":
