@@ -216,9 +216,9 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     tracker.edit_id = edit.id
     tracker.edit_uuid = edit.uuid
 
-    # Update status immediately to show progress to user
+    # Update status immediately to show progress to user - INSTANT FEEDBACK
     crud.update_edit_status(db, edit.id, "processing")
-    crud.update_edit_processing_stage(db, edit.id, "pending")  # Start with pending, Celery will update to enhancing_prompt
+    crud.update_edit_processing_stage(db, edit.id, "enhancing_prompt")  # Show enhancing_prompt immediately
     
     # Track database operations completion and task queuing
     tracker.end_stage("database_operations")

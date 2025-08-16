@@ -23,6 +23,7 @@ class StageProcessor:
         self.edit_id = edit_id
         self.db = db
         self.edit = None
+        self.cached_image_bytes = None  # Cache for image bytes to avoid multiple S3 downloads
         
     def get_edit(self):
         """Get edit details from database"""
@@ -35,10 +36,10 @@ class StageProcessor:
         crud.update_edit_processing_stage(self.db, self.edit_id, stage)
         print(f"STAGE UPDATED: {stage} for edit {self.edit_id}")
     
-    def stage_enhance_prompt(self):
-        """Stage: Enhance prompt with LLM"""
-        print(f"STAGE: Enhancing prompt for edit {self.edit_id}")
-        self.update_stage("enhancing_prompt")
+    def stage_enhance_prompt_optimized(self):
+        """Stage: Enhance prompt with LLM - Optimized to skip redundant stage update"""
+        print(f"STAGE: Enhancing prompt for edit {self.edit_id} (API already set stage)")
+        # Skip self.update_stage("enhancing_prompt") since API already set it
         
         edit = self.get_edit()
         original_prompt = edit.prompt
@@ -49,10 +50,10 @@ class StageProcessor:
                 print("Attempting prompt enhancement with LLM")
                 llm_provider = get_provider()
                 if llm_provider:
-                    # We need to fetch the image for prompt enhancement - Optimized
+                    # Fetch image for prompt enhancement - Optimized
                     print(f"Fetching image for prompt enhancement from: {edit.original_image_url}")
                     import httpx
-                    timeout = httpx.Timeout(15.0, connect=5.0)  # Faster timeouts
+                    timeout = httpx.Timeout(10.0, connect=3.0)  # Even faster timeouts
                     with httpx.Client(timeout=timeout) as client:
                         response = client.get(edit.original_image_url)
                         response.raise_for_status()
@@ -66,6 +67,11 @@ class StageProcessor:
                     # Update database with enhanced prompt
                     crud.update_edit_enhanced_prompt(self.db, self.edit_id, enhanced_prompt)
                     print(f"Enhanced prompt saved to database for edit {self.edit_id}")
+                    
+                    # Store image_bytes for reuse to avoid second S3 download
+                    self.cached_image_bytes = image_bytes
+                    print(f"Cached image bytes for reuse (size: {len(image_bytes)} bytes)")
+                    
             except Exception as e:
                 print(f"LLM enhancement failed: {e}")
                 print("Falling back to original prompt")
@@ -79,16 +85,22 @@ class StageProcessor:
             return original_prompt
     
     def stage_fetch_image(self):
-        """Stage: Fetch original image from S3 - Optimized"""
+        """Stage: Fetch original image from S3 - Optimized with caching"""
         print(f"STAGE: Fetching original image for edit {self.edit_id}")
         self.update_stage("fetching_original_image")
         
+        # Check if we already have cached image bytes from prompt enhancement
+        if hasattr(self, 'cached_image_bytes') and self.cached_image_bytes:
+            print(f"Using cached image bytes (size: {len(self.cached_image_bytes)} bytes) - SKIPPING S3 DOWNLOAD")
+            return self.cached_image_bytes
+        
+        # If not cached, download from S3
         edit = self.get_edit()
         image_url = edit.original_image_url
         print(f"Fetching image from: {image_url}")
         
-        # Optimized HTTP request with faster timeout and connection pooling
-        timeout = httpx.Timeout(15.0, connect=5.0)  # Faster timeouts
+        # Optimized HTTP request with faster timeout
+        timeout = httpx.Timeout(10.0, connect=3.0)  # Even faster timeouts
         with httpx.Client(timeout=timeout) as client:
             response = client.get(image_url)
             response.raise_for_status()
@@ -213,7 +225,8 @@ def process_edit_with_stage_retries(edit_id: int):
         if tracker:
             tracker.start_stage("prompt_enhancement")
         
-        prompt_to_use = processor.stage_enhance_prompt()
+        # Skip updating stage to enhancing_prompt since API already set it
+        prompt_to_use = processor.stage_enhance_prompt_optimized()
         
         if tracker:
             tracker.end_stage("prompt_enhancement")
