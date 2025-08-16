@@ -15,7 +15,9 @@ try:
     from .llm import get_provider
     LLM_AVAILABLE = True
 except ImportError:
+    print("LLM provider not available")
     LLM_AVAILABLE = False
+    get_provider = None
 
 
 class StageProcessor:
@@ -36,7 +38,7 @@ class StageProcessor:
         crud.update_edit_processing_stage(self.db, self.edit_id, stage)
         print(f"STAGE UPDATED: {stage} for edit {self.edit_id}")
     
-    def stage_enhance_prompt_optimized(self):
+    def stage_enhance_prompt(self):
         """Stage: Enhance prompt with LLM - Optimized to skip redundant stage update"""
         print(f"STAGE: Enhancing prompt for edit {self.edit_id} (API already set stage)")
         # Skip self.update_stage("enhancing_prompt") since API already set it
@@ -226,7 +228,7 @@ def process_edit_with_stage_retries(edit_id: int):
             tracker.start_stage("prompt_enhancement")
         
         # Skip updating stage to enhancing_prompt since API already set it
-        prompt_to_use = processor.stage_enhance_prompt_optimized()
+        prompt_to_use = processor.stage_enhance_prompt()
         
         if tracker:
             tracker.end_stage("prompt_enhancement")
