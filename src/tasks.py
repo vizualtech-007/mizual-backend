@@ -2,15 +2,7 @@ import asyncio
 from celery import Celery
 from . import crud, database, flux_api, s3, models
 from .flux_api import BFLServiceError
-# Import with error handling to prevent Celery task loading issues
-try:
-    from .task_stages import process_edit_with_stage_retries
-    STAGE_RETRIES_AVAILABLE = True
-    print("Successfully imported stage-specific retry system")
-except ImportError as e:
-    print(f"Failed to import stage retries: {e}")
-    STAGE_RETRIES_AVAILABLE = False
-    process_edit_with_stage_retries = None
+from .task_stages import process_edit_with_stage_retries
 import os
 
 # Get Redis URLs and modify them to work with Celery SSL requirements
@@ -44,35 +36,17 @@ def process_image_edit(edit_id: int):
     print(f"CELERY TASK STARTED: process_image_edit for edit_id={edit_id} (stage-specific retries)")
     
     try:
-        # Use the new stage-specific retry system if available
-        if STAGE_RETRIES_AVAILABLE and process_edit_with_stage_retries:
-            process_edit_with_stage_retries(edit_id)
-            print(f"TASK COMPLETED: Edit {edit_id} processed successfully")
-        else:
-            print(f"FALLBACK: Stage retries not available, using basic processing")
-            # Fallback to basic processing
-            db = next(database.get_db())
-            edit = crud.get_edit(db, edit_id)
-            if edit:
-                crud.update_edit_status(db, edit_id, "failed")
-                crud.update_edit_processing_stage(db, edit_id, "failed")
-                print(f"Edit {edit_id} marked as failed due to missing stage retry system")
-            db.close()
+        # Use the stage-specific retry system
+        process_edit_with_stage_retries(edit_id)
+        print(f"TASK COMPLETED: Edit {edit_id} processed successfully")
         
     except Exception as e:
         print(f"TASK FAILED: Edit {edit_id} failed with error: {str(e)}")
         print(f"ERROR TYPE: {type(e).__name__}")
         print(f"ERROR DETAILS: {repr(e)}")
         
-        # Mark as failed in database
-        try:
-            db = next(database.get_db())
-            crud.update_edit_status(db, edit_id, "failed")
-            crud.update_edit_processing_stage(db, edit_id, "failed")
-            db.close()
-        except Exception as db_error:
-            print(f"Failed to update database: {db_error}")
-        
+        # Don't use Celery's retry mechanism - we handle retries internally
+        # Just mark as failed and exit
         return
 
 # Register the same function with the old name for backward compatibility with old tasks in queue

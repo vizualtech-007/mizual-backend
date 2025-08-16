@@ -15,9 +15,7 @@ try:
     from .llm import get_provider
     LLM_AVAILABLE = True
 except ImportError:
-    print("LLM provider not available")
     LLM_AVAILABLE = False
-    get_provider = None
 
 
 class StageProcessor:
@@ -229,7 +227,7 @@ def process_edit_with_stage_retries(edit_id: int):
         if tracker:
             tracker.start_stage("prompt_enhancement")
         
-        # Skip updating stage to enhancing_prompt since API already set it
+        # Process prompt enhancement (API already set the stage)
         prompt_to_use = processor.stage_enhance_prompt()
         
         if tracker:
