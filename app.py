@@ -219,6 +219,10 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         parent_edit_uuid=edit_request.parent_edit_uuid
     )
 
+    # Update status immediately to show progress to user
+    crud.update_edit_status(db, edit.id, "processing")
+    crud.update_edit_processing_stage(db, edit.id, "enhancing_prompt")
+    
     # Process the image edit asynchronously with the final prompt
     tasks.process_image_edit.delay(edit.id)
     

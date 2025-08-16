@@ -11,7 +11,7 @@ def get_status_message(status: str, processing_stage: str = None) -> dict:
     # Handle failed status first
     if status == "failed":
         return {
-            "message": "Edit failed. Please try again.",
+            "message": "Image editing failed. The AI service is currently unavailable. Please try again later.",
             "stage": "failed",
             "progress_percent": 0,
             "is_complete": True,

@@ -136,8 +136,9 @@ def process_edit_with_stage_retries(edit_id: int):
         print(f"Original prompt: '{edit.prompt}'")
         print(f"Enhanced prompt: '{edit.enhanced_prompt}'")
         
-        # Initialize processing
+        # Initialize processing - Update status immediately
         crud.update_edit_status(db, edit_id, "processing")
+        processor.update_stage("enhancing_prompt")  # Start with enhancing_prompt since Gemini already ran
         processor.update_stage("initializing_processing")
         processor.update_stage("preparing_image_data")
         
