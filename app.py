@@ -106,6 +106,48 @@ async def celery_health_check(request: Request):
             "redis_connection": "failed"
         }
 
+@app.get("/debug/db-schema")
+@limiter.limit("5/minute")
+async def debug_database_schema(request: Request):
+    """Debug endpoint to check database schema and table structure"""
+    try:
+        db = next(database.get_db())
+        
+        # Check current schema path
+        schema_result = db.execute(text("SHOW search_path")).fetchone()
+        current_schema = schema_result[0] if schema_result else "unknown"
+        
+        # Check if edits table exists and get its columns
+        table_check = db.execute(text("""
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns 
+            WHERE table_name = 'edits' 
+            AND table_schema = ANY(current_schemas(false))
+            ORDER BY ordinal_position
+        """)).fetchall()
+        
+        # Check environment variable
+        environment = os.environ.get("ENVIRONMENT", "unknown")
+        
+        return {
+            "environment": environment,
+            "current_schema_path": current_schema,
+            "edits_table_columns": [
+                {
+                    "column_name": row[0],
+                    "data_type": row[1], 
+                    "is_nullable": row[2],
+                    "column_default": row[3]
+                } for row in table_check
+            ],
+            "has_processing_stage": any(row[0] == 'processing_stage' for row in table_check)
+        }
+    except Exception as e:
+        return {"error": f"Database schema check failed: {str(e)}"}
+    finally:
+        if 'db' in locals():
+            db.close()
+
 @app.post("/edit-image/", response_model=schemas.EditCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_DAILY_IMAGES}/day")  # Configurable daily limit per IP
 @limiter.limit(f"1/{RATE_LIMIT_BURST_SECONDS}seconds")  # Configurable burst protection per IP
