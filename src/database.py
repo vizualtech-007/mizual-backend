@@ -29,9 +29,16 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+def set_schema_for_session(db):
+    """Explicitly set the schema path for a database session"""
+    schema_name = "preview" if ENVIRONMENT == "preview" else "public"
+    db.execute(text(f"SET search_path TO {schema_name}, public"))
+    db.commit()
+
 def get_db():
     db = SessionLocal()
     try:
+        set_schema_for_session(db)
         yield db
     finally:
         db.close()
@@ -42,6 +49,8 @@ def get_db_with_retry(max_retries=3):
         db = None
         try:
             db = SessionLocal()
+            # Set schema path explicitly
+            set_schema_for_session(db)
             # Test the connection with proper SQLAlchemy text() wrapper
             db.execute(text("SELECT 1"))
             return db
