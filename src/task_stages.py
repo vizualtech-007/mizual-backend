@@ -43,17 +43,20 @@ class StageProcessor:
         return image_bytes
     
     def stage_process_with_ai(self, image_bytes: bytes, prompt: str):
-        """Stage: Process image with BFL AI"""
+        """Stage: Process image with BFL AI - NO RETRIES"""
         print(f"STAGE: Processing with AI for edit {self.edit_id}")
         self.update_stage("connecting_to_ai_service")
         
         print(f"Calling BFL API for edit {self.edit_id}")
         self.update_stage("processing_with_ai")
         
-        edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, prompt))
-        print(f"BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
-        
-        return edited_image_bytes
+        try:
+            edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, prompt))
+            print(f"BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
+            return edited_image_bytes
+        except Exception as e:
+            print(f"BFL API ERROR: {str(e)} - NO RETRIES")
+            raise e
     
     def stage_upload_result(self, edited_image_bytes: bytes):
         """Stage: Upload result to S3"""
@@ -77,11 +80,22 @@ class StageProcessor:
         print(f"TASK COMPLETED: Edit {self.edit_id} completed successfully")
 
 
-def retry_stage_with_backoff(stage_func, stage_name: str, max_retries: int = 3, base_delay: int = 30):
+def retry_stage_with_backoff(stage_func, stage_name: str, max_retries: int = 3, base_delay: int = 30, allow_retries: bool = True):
     """
     Retry a specific stage with exponential backoff.
     Only retries the failed stage, not the entire process.
+    Some stages (like AI processing) don't retry on failure.
     """
+    if not allow_retries:
+        # No retries allowed - fail immediately on any error
+        try:
+            print(f"STAGE ATTEMPT: {stage_name} (no retries allowed)")
+            return stage_func()
+        except Exception as e:
+            print(f"STAGE FAILED: {stage_name} - {str(e)} (no retries)")
+            raise e
+    
+    # Normal retry logic for stages that allow retries
     for attempt in range(max_retries):
         try:
             print(f"STAGE ATTEMPT: {stage_name} (attempt {attempt + 1}/{max_retries})")
@@ -139,12 +153,13 @@ def process_edit_with_stage_retries(edit_id: int):
             base_delay=10
         )
         
-        # Stage 2: Process with AI (with retries)
+        # Stage 2: Process with AI (NO RETRIES - fail immediately on BFL/Gemini errors)
         edited_image_bytes = retry_stage_with_backoff(
             lambda: processor.stage_process_with_ai(image_bytes, prompt_to_use),
             "process_with_ai",
-            max_retries=3,
-            base_delay=60
+            max_retries=1,
+            base_delay=0,
+            allow_retries=False
         )
         
         # Stage 3: Upload result (with retries)
