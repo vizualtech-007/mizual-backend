@@ -58,12 +58,20 @@ def process_image_edit(self, edit_id: int):
         # Stage 1: Processing started
         print(f"UPDATING STATUS: edit_id={edit_id} to processing")
         crud.update_edit_status(db, edit_id, "processing")
-        crud.update_edit_processing_stage(db, edit_id, "processing_image")
-        print(f"STATUS UPDATED: processing_image stage for edit {edit_id}")
+        crud.update_edit_processing_stage(db, edit_id, "initializing_processing")
+        print(f"STAGE UPDATED: initializing_processing for edit {edit_id}")
+        
+        # Stage: Preparing image data
+        crud.update_edit_processing_stage(db, edit_id, "preparing_image_data")
+        print(f"STAGE UPDATED: preparing_image_data for edit {edit_id}")
 
         # Determine which prompt to use (enhanced or original)
         prompt_to_use = edit.enhanced_prompt if edit.enhanced_prompt else edit.prompt
         print(f"Using prompt for BFL API: '{prompt_to_use[:100]}...'")
+        
+        # Stage: Fetching original image
+        crud.update_edit_processing_stage(db, edit_id, "fetching_original_image")
+        print(f"STAGE UPDATED: fetching_original_image for edit {edit_id}")
         
         # Use the original image URL directly (no localhost replacement needed)
         image_url = edit.original_image_url
@@ -75,10 +83,23 @@ def process_image_edit(self, edit_id: int):
         response.raise_for_status()
         image_bytes = response.content
         print(f"Successfully fetched original image, size: {len(image_bytes)} bytes")
+        
+        # Stage: Connecting to AI service
+        crud.update_edit_processing_stage(db, edit_id, "connecting_to_ai_service")
+        print(f"STAGE UPDATED: connecting_to_ai_service for edit {edit_id}")
 
         print(f"Calling BFL API for edit {edit_id}")
+        
+        # Stage: Processing with AI
+        crud.update_edit_processing_stage(db, edit_id, "processing_with_ai")
+        print(f"STAGE UPDATED: processing_with_ai for edit {edit_id}")
+        
         edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, prompt_to_use))
         print(f"BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
+        
+        # Stage: Preparing result
+        crud.update_edit_processing_stage(db, edit_id, "preparing_result")
+        print(f"STAGE UPDATED: preparing_result for edit {edit_id}")
 
         # Stage 2: Uploading result
         print(f"UPDATING STAGE: uploading_result for edit {edit_id}")

@@ -33,14 +33,56 @@ def get_status_message(status: str, processing_stage: str = None) -> dict:
         "pending": {
             "message": "Your edit is queued...",
             "stage": "pending",
-            "progress_percent": 10,
+            "progress_percent": 5,
             "is_complete": False,
             "is_error": False
         },
         "enhancing_prompt": {
             "message": "Enhancing your prompt with AI...",
             "stage": "enhancing_prompt",
+            "progress_percent": 10,
+            "is_complete": False,
+            "is_error": False
+        },
+        "initializing_processing": {
+            "message": "Initializing image processing...",
+            "stage": "initializing_processing",
+            "progress_percent": 15,
+            "is_complete": False,
+            "is_error": False
+        },
+        "preparing_image_data": {
+            "message": "Preparing your image data...",
+            "stage": "preparing_image_data",
+            "progress_percent": 20,
+            "is_complete": False,
+            "is_error": False
+        },
+        "fetching_original_image": {
+            "message": "Retrieving your original image...",
+            "stage": "fetching_original_image",
             "progress_percent": 25,
+            "is_complete": False,
+            "is_error": False
+        },
+        "connecting_to_ai_service": {
+            "message": "Connecting to AI service...",
+            "stage": "connecting_to_ai_service",
+            "progress_percent": 30,
+            "is_complete": False,
+            "is_error": False
+        },
+        "processing_with_ai": {
+            "message": "AI is editing your image...",
+            "stage": "processing_with_ai",
+            "progress_percent": 60,
+            "is_complete": False,
+            "is_error": False
+        },
+        "preparing_result": {
+            "message": "Preparing your edited image...",
+            "stage": "preparing_result",
+            "progress_percent": 80,
             "is_complete": False,
             "is_error": False
         },
