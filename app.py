@@ -9,6 +9,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from src import models, schemas, database, crud, s3, tasks
 from src.database import engine
+from src.performance_tracker import start_performance_tracking
 import uuid
 import base64
 import os
@@ -181,10 +182,18 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         raise HTTPException(status_code=400, detail=f"Invalid image format: {e}")
     
     original_file_name = f"original-{uuid.uuid4()}.png"
+    
+    # Start performance tracking immediately when request is received
+    tracker = start_performance_tracking(0, "temp")  # Will update with real edit_id later
+    tracker.start_stage("image_upload_s3")
 
     try:
         original_image_url = s3.upload_file_to_s3(image_bytes, original_file_name)
         print(f"Uploaded original image to: {original_image_url}")
+        
+        # Track S3 upload completion
+        tracker.end_stage("image_upload_s3")
+        tracker.start_stage("prompt_enhancement")
     except Exception as e:
         print(f"Failed to upload original image to S3: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to upload original image to S3: {e}")
@@ -209,6 +218,10 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         print(f"Using enhanced prompt for BFL")
     else:
         print(f"Using original prompt for BFL")
+    
+    # Track prompt enhancement completion
+    tracker.end_stage("prompt_enhancement")
+    tracker.start_stage("database_operations")
 
     # Create database record with both original and enhanced prompts
     edit = crud.create_edit(
@@ -218,10 +231,18 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         original_image_url=original_image_url,
         parent_edit_uuid=edit_request.parent_edit_uuid
     )
+    
+    # Update tracker with real edit_id and uuid
+    tracker.edit_id = edit.id
+    tracker.edit_uuid = edit.uuid
 
     # Update status immediately to show progress to user
     crud.update_edit_status(db, edit.id, "processing")
     crud.update_edit_processing_stage(db, edit.id, "enhancing_prompt")
+    
+    # Track database operations completion and task queuing
+    tracker.end_stage("database_operations")
+    tracker.log_milestone("task_queued", f"celery_task_queued")
     
     # Process the image edit asynchronously with the final prompt
     tasks.process_image_edit.delay(edit.id)

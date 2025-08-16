@@ -7,6 +7,7 @@ import asyncio
 import httpx
 from . import crud, database, flux_api, s3
 from .flux_api import BFLServiceError
+from .performance_tracker import get_performance_tracker, finish_performance_tracking
 
 
 class StageProcessor:
@@ -122,7 +123,13 @@ def process_edit_with_stage_retries(edit_id: int):
     Each stage can be retried independently.
     """
     db = None
+    tracker = None
     try:
+        # Get performance tracker
+        tracker = get_performance_tracker(edit_id)
+        if tracker:
+            tracker.log_milestone("celery_task_started", "task_picked_up_by_worker")
+        
         # Initialize
         db = database.get_db_with_retry(max_retries=3)
         processor = StageProcessor(edit_id, db)
@@ -130,6 +137,8 @@ def process_edit_with_stage_retries(edit_id: int):
         
         if not edit:
             print(f"TASK ERROR: Edit {edit_id} not found in database")
+            if tracker:
+                finish_performance_tracking(edit_id, "failed_edit_not_found")
             return
         
         print(f"TASK PROCESSING: Edit {edit_id} with UUID {edit.uuid}")
@@ -137,16 +146,25 @@ def process_edit_with_stage_retries(edit_id: int):
         print(f"Enhanced prompt: '{edit.enhanced_prompt}'")
         
         # Initialize processing - Update status immediately
+        if tracker:
+            tracker.start_stage("celery_initialization")
+        
         crud.update_edit_status(db, edit_id, "processing")
         processor.update_stage("enhancing_prompt")  # Start with enhancing_prompt since Gemini already ran
         processor.update_stage("initializing_processing")
         processor.update_stage("preparing_image_data")
+        
+        if tracker:
+            tracker.end_stage("celery_initialization")
         
         # Determine prompt to use
         prompt_to_use = edit.enhanced_prompt if edit.enhanced_prompt else edit.prompt
         print(f"Using prompt for BFL API: '{prompt_to_use[:100]}...'")
         
         # Stage 1: Fetch image (with retries)
+        if tracker:
+            tracker.start_stage("fetch_original_image")
+        
         image_bytes = retry_stage_with_backoff(
             lambda: processor.stage_fetch_image(),
             "fetch_image",
@@ -154,7 +172,13 @@ def process_edit_with_stage_retries(edit_id: int):
             base_delay=10
         )
         
+        if tracker:
+            tracker.end_stage("fetch_original_image")
+        
         # Stage 2: Process with AI (NO RETRIES - fail immediately on BFL/Gemini errors)
+        if tracker:
+            tracker.start_stage("ai_processing")
+        
         edited_image_bytes = retry_stage_with_backoff(
             lambda: processor.stage_process_with_ai(image_bytes, prompt_to_use),
             "process_with_ai",
@@ -163,7 +187,13 @@ def process_edit_with_stage_retries(edit_id: int):
             allow_retries=False
         )
         
+        if tracker:
+            tracker.end_stage("ai_processing")
+        
         # Stage 3: Upload result (with retries)
+        if tracker:
+            tracker.start_stage("upload_result")
+        
         edited_image_url = retry_stage_with_backoff(
             lambda: processor.stage_upload_result(edited_image_bytes),
             "upload_result",
@@ -171,8 +201,16 @@ def process_edit_with_stage_retries(edit_id: int):
             base_delay=10
         )
         
+        if tracker:
+            tracker.end_stage("upload_result")
+            tracker.start_stage("finalization")
+        
         # Stage 4: Complete
         processor.stage_complete(edited_image_url)
+        
+        if tracker:
+            tracker.end_stage("finalization")
+            finish_performance_tracking(edit_id, "completed")
         
     except Exception as e:
         print(f"TASK FAILED: Edit {edit_id} failed: {str(e)}")
@@ -183,6 +221,11 @@ def process_edit_with_stage_retries(edit_id: int):
                 print(f"STATUS UPDATED: Edit {edit_id} marked as failed")
             except Exception as update_error:
                 print(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
+        
+        # Finish performance tracking with failure
+        if tracker:
+            finish_performance_tracking(edit_id, f"failed_{type(e).__name__}")
+        
         raise e
     
     finally:
