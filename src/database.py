@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -39,10 +39,11 @@ def get_db():
 def get_db_with_retry(max_retries=3):
     """Get database connection with retry logic for tasks"""
     for attempt in range(max_retries):
+        db = None
         try:
             db = SessionLocal()
-            # Test the connection
-            db.execute("SELECT 1")
+            # Test the connection with proper SQLAlchemy text() wrapper
+            db.execute(text("SELECT 1"))
             return db
         except Exception as e:
             if db:
