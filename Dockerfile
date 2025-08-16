@@ -1,5 +1,5 @@
-# Mizual Backend Dockerfile
-FROM python:3.11-slim
+# Multi-stage Dockerfile for FastAPI
+FROM python:3.11-slim AS base
 
 # Set working directory
 WORKDIR /code
@@ -7,12 +7,31 @@ WORKDIR /code
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Development stage
+FROM base AS development
+
+# Copy application code
+COPY . /code
+
+# Expose port
+EXPOSE 8000
+
+# Set Python path
+ENV PYTHONPATH=/code
+
+# Start development server with hot reload
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# Production stage
+FROM base AS production
 
 # Copy application code
 COPY . /code

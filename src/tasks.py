@@ -1,6 +1,7 @@
 import asyncio
 from celery import Celery
 from . import crud, database, flux_api, s3, models
+from .flux_api import BFLServiceError
 import os
 
 # Get Redis URLs and modify them to work with Celery SSL requirements
@@ -25,20 +26,33 @@ celery = Celery(
     backend=backend_url
 )
 
-@celery.task(name='tasks.process_image_edit', bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 30}, soft_time_limit=120, time_limit=130)
+@celery.task(name='tasks.process_image_edit', bind=True, autoretry_for=(BFLServiceError,), retry_kwargs={'max_retries': 2, 'countdown': 60}, soft_time_limit=300, time_limit=330)
 def process_image_edit(self, edit_id: int):
     retry_count = self.request.retries
-    print(f"CELERY TASK STARTED: process_image_edit for edit_id={edit_id} (attempt {retry_count + 1}/4)")
+    print(f"CELERY TASK STARTED: process_image_edit for edit_id={edit_id} (attempt {retry_count + 1}/3)")
     
-    db = next(database.get_db())
-    edit = crud.get_edit(db, edit_id)
-    if not edit:
-        print(f"TASK ERROR: Edit {edit_id} not found in database")
+    # Use improved database connection with retry logic
+    db = None
+    try:
+        db = database.get_db_with_retry(max_retries=3)
+    except Exception as e:
+        print(f"CRITICAL ERROR: Could not establish database connection for edit {edit_id}: {e}")
         return
+    
+    try:
+        edit = crud.get_edit(db, edit_id)
+        if not edit:
+            print(f"TASK ERROR: Edit {edit_id} not found in database")
+            return
 
-    print(f"TASK PROCESSING: Edit {edit_id} with UUID {edit.uuid}")
-    print(f"Original prompt: '{edit.prompt}'")
-    print(f"Enhanced prompt: '{edit.enhanced_prompt}'")
+        print(f"TASK PROCESSING: Edit {edit_id} with UUID {edit.uuid}")
+        print(f"Original prompt: '{edit.prompt}'")
+        print(f"Enhanced prompt: '{edit.enhanced_prompt}'")
+    except Exception as e:
+        print(f"DATABASE ERROR: Could not fetch edit {edit_id}: {e}")
+        if db:
+            db.close()
+        return
     
     try:
         # Stage 1: Processing started
@@ -81,29 +95,63 @@ def process_image_edit(self, edit_id: int):
         crud.update_edit_processing_stage(db, edit_id, "completed")
         print(f"TASK COMPLETED: Edit {edit_id} completed successfully")
 
+    except BFLServiceError as e:
+        retry_count = self.request.retries
+        max_retries = self.retry_kwargs.get('max_retries', 2)
+        
+        print(f"BFL SERVICE ERROR: {str(e)}")
+        print(f"ERROR TYPE: BFLServiceError")
+        print(f"STATUS CODE: {getattr(e, 'status_code', 'N/A')}")
+        print(f"IS TEMPORARY: {getattr(e, 'is_temporary', False)}")
+        print(f"RETRY INFO: Attempt {retry_count + 1}/{max_retries + 1}")
+        
+        # Check if we should retry based on error type
+        should_retry = getattr(e, 'is_temporary', False) and retry_count < max_retries
+        
+        if not should_retry or retry_count >= max_retries:
+            print(f"NOT RETRYING: Marking edit {edit_id} as failed")
+            try:
+                # Reconnect to database if needed
+                if not db or db.is_active is False:
+                    if db:
+                        db.close()
+                    db = database.get_db_with_retry(max_retries=3)
+                
+                crud.update_edit_status(db, edit_id, "failed")
+                crud.update_edit_processing_stage(db, edit_id, "failed")
+                print(f"STATUS UPDATED: Edit {edit_id} marked as failed due to BFL service error")
+            except Exception as update_error:
+                print(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
+            return  # Don't retry, mark as failed
+        else:
+            print(f"RETRYING: Will retry edit {edit_id} in 60 seconds (attempt {retry_count + 2}/{max_retries + 1})")
+            # Re-raise to trigger Celery's retry mechanism
+            raise
+            
     except Exception as e:
         retry_count = self.request.retries
-        max_retries = self.retry_kwargs.get('max_retries', 3)
+        max_retries = self.retry_kwargs.get('max_retries', 2)
         
-        print(f"TASK ERROR: Error processing edit {edit_id}: {str(e)}")
+        print(f"UNEXPECTED ERROR: Error processing edit {edit_id}: {str(e)}")
         print(f"ERROR TYPE: {type(e).__name__}")
         print(f"ERROR DETAILS: {repr(e)}")
         print(f"RETRY INFO: Attempt {retry_count + 1}/{max_retries + 1}")
         
-        # Only mark as failed if we've exhausted all retries
-        if retry_count >= max_retries:
-            print(f"MAX RETRIES REACHED: Marking edit {edit_id} as failed after {max_retries + 1} attempts")
-            try:
-                crud.update_edit_status(db, edit_id, "failed")
-                crud.update_edit_processing_stage(db, edit_id, "failed")
-                print(f"STATUS UPDATED: Edit {edit_id} marked as failed")
-            except Exception as update_error:
-                print(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
-        else:
-            print(f"RETRYING: Will retry edit {edit_id} in 30 seconds (attempt {retry_count + 2}/{max_retries + 1})")
-        
-        # Re-raise the exception to trigger Celery's retry mechanism
-        raise
+        # For unexpected errors, always mark as failed (don't retry)
+        print(f"UNEXPECTED ERROR: Marking edit {edit_id} as failed")
+        try:
+            # Reconnect to database if needed
+            if not db or db.is_active is False:
+                if db:
+                    db.close()
+                db = database.get_db_with_retry(max_retries=3)
+            
+            crud.update_edit_status(db, edit_id, "failed")
+            crud.update_edit_processing_stage(db, edit_id, "failed")
+            print(f"STATUS UPDATED: Edit {edit_id} marked as failed due to unexpected error")
+        except Exception as update_error:
+            print(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
+        return  # Don't retry unexpected errors
             
     finally:
         print(f"TASK FINISHED: Closing database connection for edit {edit_id}")
