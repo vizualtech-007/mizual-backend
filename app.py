@@ -188,46 +188,26 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     tracker.start_stage("image_upload_s3")
 
     try:
+        # Optimized S3 upload with better performance
         original_image_url = s3.upload_file_to_s3(image_bytes, original_file_name)
         print(f"Uploaded original image to: {original_image_url}")
         
-        # Track S3 upload completion
+        # Track S3 upload completion - Skip prompt enhancement for instant API response
         tracker.end_stage("image_upload_s3")
-        tracker.start_stage("prompt_enhancement")
+        tracker.start_stage("database_operations")
     except Exception as e:
         print(f"Failed to upload original image to S3: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to upload original image to S3: {e}")
 
-    # Try to enhance the prompt with LLM if available
-    enhanced_prompt = None
+    # Skip prompt enhancement in API - moved to Celery task for instant response
     original_prompt = edit_request.prompt
-    
-    if LLM_AVAILABLE and os.environ.get("ENABLE_PROMPT_ENHANCEMENT", "true").lower() in ["true", "1", "yes"]:
-        try:
-            print("Attempting prompt enhancement with LLM")
-            llm_provider = get_provider()
-            if llm_provider:
-                enhanced_prompt = llm_provider.enhance_prompt(original_prompt, image_bytes)
-        except Exception as e:
-            print(f"Error enhancing prompt: {str(e)}")
-            enhanced_prompt = None
-    
-    # Use enhanced prompt if available, otherwise use original
-    final_prompt = enhanced_prompt if enhanced_prompt else original_prompt
-    if enhanced_prompt:
-        print(f"Using enhanced prompt for BFL")
-    else:
-        print(f"Using original prompt for BFL")
-    
-    # Track prompt enhancement completion
-    tracker.end_stage("prompt_enhancement")
-    tracker.start_stage("database_operations")
+    print("Prompt enhancement moved to Celery task for faster API response")
 
-    # Create database record with both original and enhanced prompts
+    # Create database record with original prompt only (enhanced_prompt will be added by Celery)
     edit = crud.create_edit(
         db=db,
         prompt=original_prompt,
-        enhanced_prompt=enhanced_prompt,
+        enhanced_prompt=None,  # Will be set by Celery task
         original_image_url=original_image_url,
         parent_edit_uuid=edit_request.parent_edit_uuid
     )
@@ -238,7 +218,7 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
 
     # Update status immediately to show progress to user
     crud.update_edit_status(db, edit.id, "processing")
-    crud.update_edit_processing_stage(db, edit.id, "enhancing_prompt")
+    crud.update_edit_processing_stage(db, edit.id, "pending")  # Start with pending, Celery will update to enhancing_prompt
     
     # Track database operations completion and task queuing
     tracker.end_stage("database_operations")

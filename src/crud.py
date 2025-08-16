@@ -64,6 +64,16 @@ def update_edit_processing_stage(db: Session, edit_id: int, processing_stage: st
         db.refresh(db_edit)
     return db_edit
 
+def update_edit_enhanced_prompt(db: Session, edit_id: int, enhanced_prompt: str):
+    """Update the enhanced prompt for an edit"""
+    set_schema_for_session(db)
+    db_edit = get_edit(db, edit_id)
+    if db_edit:
+        db_edit.enhanced_prompt = enhanced_prompt
+        db.commit()
+        db.refresh(db_edit)
+    return db_edit
+
 # Feedback CRUD Operations
 def create_feedback(db: Session, feedback: schemas.FeedbackCreate, user_ip: str = None):
     """Create feedback for an edit"""

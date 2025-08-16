@@ -8,6 +8,14 @@ import httpx
 from . import crud, database, flux_api, s3
 from .flux_api import BFLServiceError
 from .performance_tracker import get_performance_tracker, finish_performance_tracking
+import os
+
+# Import LLM provider
+try:
+    from .llm import get_provider
+    LLM_AVAILABLE = True
+except ImportError:
+    LLM_AVAILABLE = False
 
 
 class StageProcessor:
@@ -27,8 +35,51 @@ class StageProcessor:
         crud.update_edit_processing_stage(self.db, self.edit_id, stage)
         print(f"STAGE UPDATED: {stage} for edit {self.edit_id}")
     
+    def stage_enhance_prompt(self):
+        """Stage: Enhance prompt with LLM"""
+        print(f"STAGE: Enhancing prompt for edit {self.edit_id}")
+        self.update_stage("enhancing_prompt")
+        
+        edit = self.get_edit()
+        original_prompt = edit.prompt
+        enhanced_prompt = None
+        
+        if LLM_AVAILABLE and os.environ.get("ENABLE_PROMPT_ENHANCEMENT", "true").lower() in ["true", "1", "yes"]:
+            try:
+                print("Attempting prompt enhancement with LLM")
+                llm_provider = get_provider()
+                if llm_provider:
+                    # We need to fetch the image for prompt enhancement - Optimized
+                    print(f"Fetching image for prompt enhancement from: {edit.original_image_url}")
+                    import httpx
+                    timeout = httpx.Timeout(15.0, connect=5.0)  # Faster timeouts
+                    with httpx.Client(timeout=timeout) as client:
+                        response = client.get(edit.original_image_url)
+                        response.raise_for_status()
+                        image_bytes = response.content
+                    
+                    enhanced_prompt = llm_provider.enhance_prompt(original_prompt, image_bytes)
+                    print("Gemini enhancement completed")
+                    print(f"Original prompt: '{original_prompt}'")
+                    print(f"Enhanced prompt: '{enhanced_prompt}'")
+                    
+                    # Update database with enhanced prompt
+                    crud.update_edit_enhanced_prompt(self.db, self.edit_id, enhanced_prompt)
+                    print(f"Enhanced prompt saved to database for edit {self.edit_id}")
+            except Exception as e:
+                print(f"LLM enhancement failed: {e}")
+                print("Falling back to original prompt")
+                enhanced_prompt = None
+        
+        if enhanced_prompt:
+            print(f"Using enhanced prompt for BFL")
+            return enhanced_prompt
+        else:
+            print(f"Using original prompt for BFL")
+            return original_prompt
+    
     def stage_fetch_image(self):
-        """Stage: Fetch original image from S3"""
+        """Stage: Fetch original image from S3 - Optimized"""
         print(f"STAGE: Fetching original image for edit {self.edit_id}")
         self.update_stage("fetching_original_image")
         
@@ -36,11 +87,14 @@ class StageProcessor:
         image_url = edit.original_image_url
         print(f"Fetching image from: {image_url}")
         
-        response = httpx.get(image_url, timeout=30.0)
-        response.raise_for_status()
-        image_bytes = response.content
+        # Optimized HTTP request with faster timeout and connection pooling
+        timeout = httpx.Timeout(15.0, connect=5.0)  # Faster timeouts
+        with httpx.Client(timeout=timeout) as client:
+            response = client.get(image_url)
+            response.raise_for_status()
+            image_bytes = response.content
+            
         print(f"Successfully fetched original image, size: {len(image_bytes)} bytes")
-        
         return image_bytes
     
     def stage_process_with_ai(self, image_bytes: bytes, prompt: str):
@@ -81,9 +135,9 @@ class StageProcessor:
         print(f"TASK COMPLETED: Edit {self.edit_id} completed successfully")
 
 
-def retry_stage_with_backoff(stage_func, stage_name: str, max_retries: int = 3, base_delay: int = 30, allow_retries: bool = True):
+def retry_stage_with_backoff(stage_func, stage_name: str, max_retries: int = 3, base_delay: int = 10, allow_retries: bool = True):
     """
-    Retry a specific stage with exponential backoff.
+    Optimized retry with faster base delays and exponential backoff.
     Only retries the failed stage, not the entire process.
     Some stages (like AI processing) don't retry on failure.
     """
@@ -96,7 +150,7 @@ def retry_stage_with_backoff(stage_func, stage_name: str, max_retries: int = 3, 
             print(f"STAGE FAILED: {stage_name} - {str(e)} (no retries)")
             raise e
     
-    # Normal retry logic for stages that allow retries
+    # Optimized retry logic with faster delays
     for attempt in range(max_retries):
         try:
             print(f"STAGE ATTEMPT: {stage_name} (attempt {attempt + 1}/{max_retries})")
@@ -106,7 +160,8 @@ def retry_stage_with_backoff(stage_func, stage_name: str, max_retries: int = 3, 
                 print(f"STAGE FAILED: {stage_name} - {str(e)}")
                 raise e
             
-            delay = base_delay * (2 ** attempt)  # Exponential backoff
+            # Faster exponential backoff: 10s, 20s, 40s instead of 30s, 60s, 120s
+            delay = base_delay * (2 ** attempt)
             print(f"STAGE RETRY: {stage_name} failed, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
             import time
             time.sleep(delay)
@@ -150,15 +205,23 @@ def process_edit_with_stage_retries(edit_id: int):
             tracker.start_stage("celery_initialization")
         
         crud.update_edit_status(db, edit_id, "processing")
-        processor.update_stage("enhancing_prompt")  # Start with enhancing_prompt since Gemini already ran
-        processor.update_stage("initializing_processing")
-        processor.update_stage("preparing_image_data")
         
         if tracker:
             tracker.end_stage("celery_initialization")
         
-        # Determine prompt to use
-        prompt_to_use = edit.enhanced_prompt if edit.enhanced_prompt else edit.prompt
+        # Stage 0: Enhance prompt (moved from API for instant response)
+        if tracker:
+            tracker.start_stage("prompt_enhancement")
+        
+        prompt_to_use = processor.stage_enhance_prompt()
+        
+        if tracker:
+            tracker.end_stage("prompt_enhancement")
+        
+        # Continue with processing stages
+        processor.update_stage("initializing_processing")
+        processor.update_stage("preparing_image_data")
+        
         print(f"Using prompt for BFL API: '{prompt_to_use[:100]}...'")
         
         # Stage 1: Fetch image (with retries)
@@ -168,8 +231,8 @@ def process_edit_with_stage_retries(edit_id: int):
         image_bytes = retry_stage_with_backoff(
             lambda: processor.stage_fetch_image(),
             "fetch_image",
-            max_retries=3,
-            base_delay=10
+            max_retries=2,  # Reduced retries for faster failure
+            base_delay=5    # Faster initial delay
         )
         
         if tracker:
@@ -197,8 +260,8 @@ def process_edit_with_stage_retries(edit_id: int):
         edited_image_url = retry_stage_with_backoff(
             lambda: processor.stage_upload_result(edited_image_bytes),
             "upload_result",
-            max_retries=3,
-            base_delay=10
+            max_retries=2,  # Reduced retries for faster failure
+            base_delay=5    # Faster initial delay
         )
         
         if tracker:

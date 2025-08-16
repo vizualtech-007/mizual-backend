@@ -14,15 +14,16 @@ connect_args = {
     "options": f"-csearch_path={schema_name},public"
 }
 
-# Improved connection pool configuration for better reliability
+# Optimized connection pool configuration for performance
 engine = create_engine(
     DATABASE_URL, 
     connect_args=connect_args,
     poolclass=QueuePool,
-    pool_size=5,
-    max_overflow=10,
+    pool_size=10,        # Increased pool size
+    max_overflow=20,     # Increased overflow
     pool_pre_ping=True,  # Validates connections before use
-    pool_recycle=3600,   # Recycle connections every hour
+    pool_recycle=1800,   # Faster recycle (30 minutes)
+    pool_timeout=10,     # Faster timeout
     echo=False
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
