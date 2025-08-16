@@ -218,7 +218,13 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
 
     # Update status immediately to show progress to user - INSTANT FEEDBACK
     crud.update_edit_status(db, edit.id, "processing")
+    print(f"API: Setting processing stage to 'enhancing_prompt' for edit {edit.id}")
     crud.update_edit_processing_stage(db, edit.id, "enhancing_prompt")  # Show enhancing_prompt immediately
+    print(f"API: Stage updated successfully for edit {edit.id}")
+    
+    # Verify the update worked
+    updated_edit = crud.get_edit(db, edit.id)
+    print(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
     
     # Track database operations completion and task queuing
     tracker.end_stage("database_operations")

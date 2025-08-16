@@ -41,7 +41,9 @@ class StageProcessor:
     def stage_enhance_prompt(self):
         """Stage: Enhance prompt with LLM - Optimized to skip redundant stage update"""
         print(f"STAGE: Enhancing prompt for edit {self.edit_id} (API already set stage)")
-        # Skip self.update_stage("enhancing_prompt") since API already set it
+        # Verify current stage before starting
+        edit = self.get_edit()
+        print(f"CELERY: Current stage when starting prompt enhancement: '{edit.processing_stage}'")
         
         edit = self.get_edit()
         original_prompt = edit.prompt
