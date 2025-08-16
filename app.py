@@ -233,6 +233,15 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     # Process the image edit asynchronously with the final prompt
     tasks.process_image_edit.delay(edit.id)
     
+    # Also queue diagnostic task to test Celery execution
+    try:
+        from src.diagnostic_task import test_task, test_imports
+        test_task.delay(edit.id)
+        test_imports.delay()
+        print(f"DIAGNOSTIC: Queued diagnostic tasks for edit {edit.id}")
+    except Exception as diag_error:
+        print(f"DIAGNOSTIC ERROR: Could not queue diagnostic tasks: {diag_error}")
+    
     print(f"Edit request queued for processing with UUID: {edit.uuid}")
 
     polling_url = str(request.url_for('get_edit_status', edit_uuid=edit.uuid))
