@@ -27,8 +27,8 @@ celery = Celery(
     backend=backend_url
 )
 
-@celery.task(name='tasks.process_image_edit', bind=True, soft_time_limit=600, time_limit=660)
-def process_image_edit(self, edit_id: int):
+@celery.task(name='tasks.process_image_edit', soft_time_limit=600, time_limit=660)
+def process_image_edit(edit_id: int):
     """
     Process image edit with stage-specific retries.
     Each stage can be retried independently without restarting the entire process.
