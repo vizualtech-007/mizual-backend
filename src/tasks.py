@@ -24,7 +24,8 @@ if backend_url.startswith('rediss://'):
 celery = Celery(
     __name__,
     broker=broker_url,
-    backend=backend_url
+    backend=backend_url,
+    broker_transport_options={'polling_interval': 0.1}
 )
 
 @celery.task(name='mizual.process_image', soft_time_limit=600, time_limit=660)
