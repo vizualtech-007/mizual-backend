@@ -8,7 +8,6 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from src import models, schemas, database, crud, s3, tasks
-from src.tasks import celery as celery_app
 from src.database import engine
 
 import uuid
@@ -217,7 +216,7 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     print(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
     
     # Process the image edit asynchronously with the final prompt
-    celery_app.send_task('mizual.process_image', args=[edit.id])
+    tasks.process_image_edit.delay(edit.id)
     
     print(f"Edit request queued for processing with UUID: {edit.uuid}")
 
