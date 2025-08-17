@@ -216,7 +216,8 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     print(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
     
     # Process the image edit asynchronously with the final prompt
-    tasks.process_image_edit.delay(edit.id)
+    from src.tasks import celery as celery_app
+    celery_app.send_task('mizual.process_image', args=[edit.id])
     
     print(f"Edit request queued for processing with UUID: {edit.uuid}")
 

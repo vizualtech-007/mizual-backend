@@ -27,7 +27,7 @@ celery = Celery(
     backend=backend_url
 )
 
-@celery.task(name='src.tasks.process_image_edit', soft_time_limit=600, time_limit=660)
+@celery.task(name='mizual.process_image', soft_time_limit=600, time_limit=660)
 def process_image_edit(edit_id: int):
     """
     Process image edit with stage-specific retries.
