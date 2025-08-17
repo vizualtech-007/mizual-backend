@@ -13,6 +13,7 @@ from src.database import engine
 import uuid
 import base64
 import os
+from datetime import datetime, timezone
 
 # Import LLM provider factory
 try:
@@ -218,6 +219,7 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     # Process the image edit asynchronously with the final prompt
     from src.tasks import celery as celery_app
     celery_app.send_task('mizual.process_image', args=[edit.id])
+    print(f"DIAGNOSTIC: Task sent to broker for edit_id={edit.id}, timestamp={datetime.now(timezone.utc).isoformat()}")
     
     print(f"Edit request queued for processing with UUID: {edit.uuid}")
 
