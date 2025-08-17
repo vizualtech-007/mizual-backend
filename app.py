@@ -9,7 +9,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from src import models, schemas, database, crud, s3, tasks
 from src.database import engine
-from src.performance_tracker import start_performance_tracking
+
 import uuid
 import base64
 import os
@@ -183,18 +183,11 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     
     original_file_name = f"original-{uuid.uuid4()}.png"
     
-    # Start performance tracking immediately when request is received
-    tracker = start_performance_tracking(0, "temp")  # Will update with real edit_id later
-    tracker.start_stage("image_upload_s3")
-
     try:
         # Optimized S3 upload with better performance
         original_image_url = s3.upload_file_to_s3(image_bytes, original_file_name)
         print(f"Uploaded original image to: {original_image_url}")
         
-        # Track S3 upload completion - Skip prompt enhancement for instant API response
-        tracker.end_stage("image_upload_s3")
-        tracker.start_stage("database_operations")
     except Exception as e:
         print(f"Failed to upload original image to S3: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to upload original image to S3: {e}")
@@ -212,10 +205,6 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         parent_edit_uuid=edit_request.parent_edit_uuid
     )
     
-    # Update tracker with real edit_id and uuid
-    tracker.edit_id = edit.id
-    tracker.edit_uuid = edit.uuid
-
     # Update status immediately to show progress to user - INSTANT FEEDBACK
     crud.update_edit_status(db, edit.id, "processing")
     print(f"API: Setting processing stage to 'enhancing_prompt' for edit {edit.id}")
@@ -225,10 +214,6 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     # Verify the update worked
     updated_edit = crud.get_edit(db, edit.id)
     print(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
-    
-    # Track database operations completion and task queuing
-    tracker.end_stage("database_operations")
-    tracker.log_milestone("task_queued", f"celery_task_queued")
     
     # Process the image edit asynchronously with the final prompt
     tasks.process_image_edit.delay(edit.id)
