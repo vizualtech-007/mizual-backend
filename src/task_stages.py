@@ -288,7 +288,6 @@ def process_edit_with_stage_retries(edit_id: int):
         
         if tracker:
             tracker.end_stage("finalization")
-            tracker.log_summary()  # Log the summary before finishing
             finish_performance_tracking(edit_id, "completed")
         
     except Exception as e:
@@ -303,7 +302,6 @@ def process_edit_with_stage_retries(edit_id: int):
         
         # Finish performance tracking with failure
         if tracker:
-            tracker.log_summary()  # Log the summary before finishing
             finish_performance_tracking(edit_id, f"failed_{type(e).__name__}")
         
         raise e
