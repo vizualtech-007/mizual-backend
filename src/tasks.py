@@ -49,10 +49,3 @@ def process_image_edit(edit_id: int):
         # Just mark as failed and exit
         return
 
-# Register the same function with the old name for backward compatibility with old tasks in queue
-@celery.task(name='src.tasks.process_image_edit')
-def process_image_edit_legacy(edit_id: int):
-    """Legacy task name for old tasks in queue"""
-    print(f"Legacy task called for edit {edit_id}")
-    return process_image_edit(edit_id)
-
