@@ -9,6 +9,8 @@ from . import crud, database, flux_api, s3
 from .flux_api import BFLServiceError
 from .performance_tracker import get_performance_tracker, finish_performance_tracking
 import os
+from .performance_tracker import PerformanceTracker
+from datetime import timezone
 
 # Import LLM provider
 try:
@@ -192,6 +194,7 @@ def process_edit_with_stage_retries(edit_id: int):
     Each stage can be retried independently.
     """
     db = None
+    tracker = None
     try:
         # Initialize
         db = database.get_db_with_retry(max_retries=3)
@@ -201,16 +204,24 @@ def process_edit_with_stage_retries(edit_id: int):
         if not edit:
             print(f"TASK ERROR: Edit {edit_id} not found in database")
             return
+
+        tracker = PerformanceTracker(edit.id, edit.uuid)
+        # Set start time to when the request was created for end-to-end measurement
+        tracker.start_time = edit.created_at.replace(tzinfo=timezone.utc).timestamp()
         
         print(f"TASK PROCESSING: Edit {edit_id} with UUID {edit.uuid}")
         print(f"Original prompt: '{edit.prompt}'")
         print(f"Enhanced prompt: '{edit.enhanced_prompt}'")
         
         # Initialize processing - Update status immediately
+        tracker.start_stage("initialization")
         crud.update_edit_status(db, edit_id, "processing")
+        tracker.end_stage("initialization")
         
         # Stage 0: Enhance prompt (moved from API for instant response)
+        tracker.start_stage("prompt_enhancement")
         prompt_to_use = processor.stage_enhance_prompt()
+        tracker.end_stage("prompt_enhancement")
         
         # Continue with processing stages
         processor.update_stage("initializing_processing")
@@ -219,14 +230,17 @@ def process_edit_with_stage_retries(edit_id: int):
         print(f"Using prompt for BFL API: '{prompt_to_use[:100]}...'")
         
         # Stage 1: Fetch image (with retries)
+        tracker.start_stage("fetch_image")
         image_bytes = retry_stage_with_backoff(
             lambda: processor.stage_fetch_image(),
             "fetch_image",
             max_retries=2,  # Reduced retries for faster failure
             base_delay=5    # Faster initial delay
         )
+        tracker.end_stage("fetch_image")
         
         # Stage 2: Process with AI (NO RETRIES - fail immediately on BFL/Gemini errors)
+        tracker.start_stage("ai_processing")
         edited_image_bytes = retry_stage_with_backoff(
             lambda: processor.stage_process_with_ai(image_bytes, prompt_to_use),
             "process_with_ai",
@@ -234,17 +248,24 @@ def process_edit_with_stage_retries(edit_id: int):
             base_delay=0,
             allow_retries=False
         )
+        tracker.end_stage("ai_processing")
         
         # Stage 3: Upload result (with retries)
+        tracker.start_stage("upload_result")
         edited_image_url = retry_stage_with_backoff(
             lambda: processor.stage_upload_result(edited_image_bytes),
             "upload_result",
             max_retries=2,  # Reduced retries for faster failure
             base_delay=5    # Faster initial delay
         )
+        tracker.end_stage("upload_result")
         
         # Stage 4: Complete
+        tracker.start_stage("finalization")
         processor.stage_complete(edited_image_url)
+        tracker.end_stage("finalization")
+
+        tracker.finish_tracking("completed")
         
     except Exception as e:
         print(f"TASK FAILED: Edit {edit_id} failed: {str(e)}")
@@ -256,6 +277,9 @@ def process_edit_with_stage_retries(edit_id: int):
             except Exception as update_error:
                 print(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
         
+        if tracker:
+            tracker.finish_tracking(f"failed_{type(e).__name__}")
+
         raise e
     
     finally:
