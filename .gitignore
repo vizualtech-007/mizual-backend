@@ -174,3 +174,4 @@ uploads/
 images/
 storage/
 .env.production
+.env.preview

@@ -15,12 +15,26 @@ services:
       timeout: 10s
       retries: 3
 
+  migration:
+    build: .
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_SCHEMA=public
+    env_file:
+      - .env.${DEPLOY_ENV:-production}
+    command: python migrate.py
+    networks:
+      - mizual-network
+    restart: "no"
+
   backend:
     build: .
     restart: unless-stopped
     depends_on:
       redis:
         condition: service_healthy
+      migration:
+        condition: service_completed_successfully
     ports:
       - "80:8000"
     environment:
@@ -28,8 +42,7 @@ services:
       - ENVIRONMENT=production
       - DATABASE_SCHEMA=public
     env_file:
-      - .env.production
-    command: sh -c "python migrate.py && uvicorn app:app --host 0.0.0.0 --port 8000"
+      - .env.${DEPLOY_ENV:-production}
     networks:
       - mizual-network
     healthcheck:
@@ -37,7 +50,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -58,7 +71,7 @@ services:
       - ENVIRONMENT=production
       - DATABASE_SCHEMA=public
     env_file:
-      - .env.production
+      - .env.${DEPLOY_ENV:-production}
     command: celery -A src.tasks.celery worker --loglevel=warning --concurrency=1 -E --prefetch-multiplier=1 --max-tasks-per-child=50
     networks:
       - mizual-network
