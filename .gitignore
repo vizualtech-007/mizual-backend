@@ -173,3 +173,4 @@ alembic.ini
 uploads/
 images/
 storage/
+.env.production

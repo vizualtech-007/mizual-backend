@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
+    networks:
+      - mizual-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=production
+      - DATABASE_SCHEMA=public
+    env_file:
+      - .env.production
+    networks:
+      - mizual-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+        reservations:
+          memory: 400M
+
+  celery:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=production
+      - DATABASE_SCHEMA=public
+    env_file:
+      - .env.production
+    command: celery -A src.tasks.celery worker --loglevel=warning --concurrency=1 -E --prefetch-multiplier=1 --max-tasks-per-child=50
+    networks:
+      - mizual-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 600M
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  mizual-network:
+    driver: bridge
