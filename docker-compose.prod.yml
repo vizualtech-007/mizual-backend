@@ -61,6 +61,12 @@ services:
     command: celery -A src.tasks.celery worker --loglevel=warning --concurrency=1 -E --prefetch-multiplier=1 --max-tasks-per-child=50
     networks:
       - mizual-network
+    healthcheck:
+      test: ["CMD", "celery", "-A", "src.tasks.celery", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     deploy:
       resources:
         limits:
