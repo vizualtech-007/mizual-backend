@@ -22,7 +22,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "80:8000"
     environment:
       - REDIS_URL=redis://redis:6379
       - ENVIRONMENT=production
