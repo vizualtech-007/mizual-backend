@@ -42,5 +42,5 @@ jobs:
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
             sleep 30
-            curl -f http://localhost:8000/health || exit 1
+            curl -f http://localhost:80/health || exit 1
             echo "Production deployment successful!"
