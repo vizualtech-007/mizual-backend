@@ -1,0 +1,36 @@
+name: Deploy Production to Lightsail
+on:
+  push:
+    branches: [lightsail]
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Deploy to Lightsail Production
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ubuntu
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            cd /opt/mizual
+            git fetch origin
+            git checkout lightsail
+            git pull origin lightsail
+            docker-compose -f docker-compose.prod.yml pull
+            docker-compose -f docker-compose.prod.yml up -d --build
+            
+      - name: Health Check
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ubuntu
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            sleep 30
+            curl -f http://localhost:8000/health || exit 1
+            echo "Production deployment successful!"
