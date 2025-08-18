@@ -17,14 +17,20 @@ jobs:
           username: ubuntu
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
-            cd /opt/mizual
-            # Clone repository if it doesn't exist
-            if [ ! -d ".git" ]; then
-              git clone https://github.com/vizualtech-007/mizual-backend.git .
+            # Preserve .env.production and clean setup
+            if [ -f /opt/mizual/.env.production ]; then
+              cp /opt/mizual/.env.production /tmp/.env.production.backup
             fi
-            git fetch origin
+            sudo rm -rf /opt/mizual
+            sudo mkdir -p /opt/mizual
+            sudo chown ubuntu:ubuntu /opt/mizual
+            cd /opt/mizual
+            git clone https://github.com/vizualtech-007/mizual-backend.git .
             git checkout lightsail
-            git pull origin lightsail
+            # Restore .env.production
+            if [ -f /tmp/.env.production.backup ]; then
+              cp /tmp/.env.production.backup .env.production
+            fi
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d --build
             
