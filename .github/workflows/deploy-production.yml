@@ -18,11 +18,15 @@ jobs:
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
             cd /opt/mizual
+            # Clone repository if it doesn't exist
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/vizualtech-007/mizual-backend.git .
+            fi
             git fetch origin
             git checkout lightsail
             git pull origin lightsail
-            docker-compose -f docker-compose.prod.yml pull
-            docker-compose -f docker-compose.prod.yml up -d --build
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --build
             
       - name: Health Check
         uses: appleboy/ssh-action@v0.1.5
