@@ -13,6 +13,7 @@ from src.database import engine
 import uuid
 import base64
 import os
+import imghdr
 
 # Import LLM provider factory
 try:
@@ -28,6 +29,10 @@ models.Base.metadata.create_all(bind=engine)
 RATE_LIMIT_DAILY_IMAGES = os.environ.get("RATE_LIMIT_DAILY_IMAGES", "3")
 RATE_LIMIT_BURST_SECONDS = os.environ.get("RATE_LIMIT_BURST_SECONDS", "10")
 RATE_LIMIT_STATUS_CHECKS_PER_MINUTE = os.environ.get("RATE_LIMIT_STATUS_CHECKS_PER_MINUTE", "30")
+
+# Image type validation configuration
+UNSUPPORTED_IMAGE_TYPES = os.environ.get("UNSUPPORTED_IMAGE_TYPES", "heic,avif,gif").lower().split(",")
+UNSUPPORTED_IMAGE_TYPES = [img_type.strip() for img_type in UNSUPPORTED_IMAGE_TYPES if img_type.strip()]
 
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -64,6 +69,42 @@ class EditImageRequest(BaseModel):
     prompt: str
     image: str
     parent_edit_uuid: Optional[str] = None  # For follow-up editing
+
+def detect_image_type(image_bytes: bytes) -> str:
+    """Detect image type from image bytes"""
+    # Try using imghdr first
+    img_type = imghdr.what(None, h=image_bytes)
+    if img_type:
+        return img_type.lower()
+    
+    # Fallback: Check magic bytes for common formats
+    if image_bytes.startswith(b'\xff\xd8\xff'):
+        return 'jpeg'
+    elif image_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png'
+    elif image_bytes.startswith(b'GIF87a') or image_bytes.startswith(b'GIF89a'):
+        return 'gif'
+    elif image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[:12]:
+        return 'webp'
+    elif image_bytes.startswith(b'\x00\x00\x00\x20ftypavif') or b'avif' in image_bytes[:32].lower():
+        return 'avif'
+    elif image_bytes.startswith(b'\x00\x00\x00\x18ftypheic') or image_bytes.startswith(b'\x00\x00\x00\x20ftypheic'):
+        return 'heic'
+    else:
+        return 'unknown'
+
+def validate_image_type(image_bytes: bytes) -> tuple[bool, str]:
+    """Validate if image type is supported"""
+    detected_type = detect_image_type(image_bytes)
+    
+    if detected_type == 'unknown':
+        return False, "Unable to detect image format. Please upload a valid image file."
+    
+    if detected_type in UNSUPPORTED_IMAGE_TYPES:
+        supported_types = [t for t in ['jpeg', 'jpg', 'png', 'webp'] if t not in UNSUPPORTED_IMAGE_TYPES]
+        return False, f"Image format '{detected_type.upper()}' is not supported. Please use one of: {', '.join(supported_types).upper()}"
+    
+    return True, detected_type
 
 @app.on_event("startup")
 def startup_event():
@@ -195,6 +236,14 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         image_bytes = base64.b64decode(encoded_image)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image format: {e}")
+    
+    # Validate image type
+    is_valid, validation_message = validate_image_type(image_bytes)
+    if not is_valid:
+        print(f"Image upload rejected: {validation_message}")
+        raise HTTPException(status_code=400, detail=validation_message)
+    
+    print(f"Image type validated: {validation_message}")
     
     original_file_name = f"original-{uuid.uuid4()}.png"
     
