@@ -227,7 +227,7 @@ def process_edit_with_stage_retries(edit_id: int):
         processor.update_stage("initializing_processing")
         processor.update_stage("preparing_image_data")
         
-        print(f"Using prompt for BFL API: '{prompt_to_use[:100]}...'")
+        print(f"Using prompt for BFL API: '{prompt_to_use}'")
         
         # Stage 1: Fetch image (with retries)
         tracker.start_stage("fetch_image")
