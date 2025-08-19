@@ -13,7 +13,6 @@ from src.database import engine
 import uuid
 import base64
 import os
-import imghdr
 
 # Import LLM provider factory
 try:
@@ -71,25 +70,29 @@ class EditImageRequest(BaseModel):
     parent_edit_uuid: Optional[str] = None  # For follow-up editing
 
 def detect_image_type(image_bytes: bytes) -> str:
-    """Detect image type from image bytes"""
-    # Try using imghdr first
-    img_type = imghdr.what(None, h=image_bytes)
-    if img_type:
-        return img_type.lower()
+    """Detect image type from image bytes using magic bytes"""
+    if not image_bytes:
+        return 'unknown'
     
-    # Fallback: Check magic bytes for common formats
+    # Check magic bytes for common formats
     if image_bytes.startswith(b'\xff\xd8\xff'):
         return 'jpeg'
     elif image_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
         return 'png'
     elif image_bytes.startswith(b'GIF87a') or image_bytes.startswith(b'GIF89a'):
         return 'gif'
-    elif image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[:12]:
+    elif image_bytes.startswith(b'RIFF') and len(image_bytes) > 12 and b'WEBP' in image_bytes[:12]:
         return 'webp'
-    elif image_bytes.startswith(b'\x00\x00\x00\x20ftypavif') or b'avif' in image_bytes[:32].lower():
+    elif len(image_bytes) > 32 and (b'avif' in image_bytes[:32].lower() or b'ftypavif' in image_bytes[:32]):
         return 'avif'
-    elif image_bytes.startswith(b'\x00\x00\x00\x18ftypheic') or image_bytes.startswith(b'\x00\x00\x00\x20ftypheic'):
+    elif len(image_bytes) > 32 and (b'heic' in image_bytes[:32].lower() or b'ftypheic' in image_bytes[:32]):
         return 'heic'
+    # Check for BMP
+    elif image_bytes.startswith(b'BM'):
+        return 'bmp'
+    # Check for TIFF
+    elif image_bytes.startswith(b'II*\x00') or image_bytes.startswith(b'MM\x00*'):
+        return 'tiff'
     else:
         return 'unknown'
 
