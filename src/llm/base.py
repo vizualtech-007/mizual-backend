@@ -5,7 +5,7 @@ Defines the common interface that all LLM providers must implement
 
 from abc import ABC, abstractmethod
 from io import BytesIO
-from PIL import Image
+import pyvips
 import os
 
 class BaseLLMProvider(ABC):
@@ -38,38 +38,40 @@ class BaseLLMProvider(ABC):
     
     def resize_image(self, image_data):
         """
-        Resize image to max dimension while preserving aspect ratio
+        Resize image to max dimension while preserving aspect ratio using PyVips
         
         Args:
             image_data (bytes): The image data as bytes
             
         Returns:
-            PIL.Image: The resized image
+            bytes: The resized image as bytes
         """
         try:
-            # Open image from bytes
-            image = Image.open(BytesIO(image_data))
+            # Load image from bytes using PyVips (streaming)
+            image = pyvips.Image.new_from_buffer(image_data, "")
             
             # Check if resizing is needed
-            width, height = image.size
+            width, height = image.width, image.height
             if width <= self.max_dimension and height <= self.max_dimension:
                 print(f"Image already within size limits: {width}x{height}")
-                return image
+                return image_data  # Return original bytes
             
-            # Calculate new dimensions
-            if width > height:
-                new_width = self.max_dimension
-                new_height = int(height * (self.max_dimension / width))
-            else:
-                new_height = self.max_dimension
-                new_width = int(width * (self.max_dimension / height))
+            # Use PyVips thumbnail_image for efficient resizing
+            # This automatically calculates dimensions and preserves aspect ratio
+            resized_image = image.thumbnail_image(self.max_dimension)
             
-            # Resize image
-            resized_image = image.resize((new_width, new_height))
-            print(f"Resized image from {width}x{height} to {new_width}x{new_height}")
-            return resized_image
+            print(f"PYVIPS: Successfully resized image from {width}x{height} to {resized_image.width}x{resized_image.height}")
+            print(f"PYVIPS: Original size: {len(image_data)} bytes, Resized size: {len(resized_bytes)} bytes")
+            
+            # Export to bytes with optimization
+            # Use JPEG with 85% quality for good balance of size/quality
+            resized_bytes = resized_image.write_to_buffer('.jpg[Q=85,optimize]')
+            
+            return resized_bytes
             
         except Exception as e:
-            print(f"Error resizing image: {str(e)}")
-            # Return original image if resize fails
-            return Image.open(BytesIO(image_data))
+            print(f"ERROR: PyVips image resize failed: {str(e)}")
+            print(f"ERROR: Image data size: {len(image_data)} bytes")
+            print(f"ERROR: Falling back to original image")
+            # Return original image bytes if resize fails
+            return image_data

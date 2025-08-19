@@ -4,10 +4,11 @@ FROM python:3.11-slim AS base
 # Set working directory
 WORKDIR /code
 
-# Install system dependencies
+# Install system dependencies (including PyVips dependencies)
 RUN apt-get update && apt-get install -y \
     gcc \
     curl \
+    libvips-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies

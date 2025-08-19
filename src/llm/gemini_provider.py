@@ -49,13 +49,8 @@ class GeminiProvider(BaseLLMProvider):
         print(f"Enhancing prompt with Gemini: '{prompt}'")
         
         try:
-            # Resize image
-            image = self.resize_image(image_data)
-            
-            # Convert to bytes for Gemini
-            img_byte_arr = BytesIO()
-            image.save(img_byte_arr, format=image.format or 'JPEG')
-            img_bytes = img_byte_arr.getvalue()
+            # Resize image using PyVips (returns bytes directly)
+            img_bytes = self.resize_image(image_data)
             
             # Use exact same system prompt as original working version
             system_prompt = f"""You are a multi-role AI assistant that will perform a complete image editing workflow analysis in sequential steps. You must complete ALL steps in order and provide your final output.

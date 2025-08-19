@@ -10,5 +10,5 @@ redis
 slowapi
 google-generativeai>=0.3.0
 python-dotenv
-Pillow
+pyvips==2.2.1
 openai>=1.0.0
