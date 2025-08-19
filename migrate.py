@@ -6,10 +6,11 @@ Runs migrations safely on each deployment using DATABASE_URL
 
 import os
 import sys
-import subprocess
 import logging
 from pathlib import Path
 from typing import List, Tuple
+import psycopg2
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 # Configure logging
 logging.basicConfig(
@@ -36,13 +37,15 @@ class MigrationRunner:
         if not self.migrations_dir.exists():
             raise FileNotFoundError(f"Migrations directory not found: {self.migrations_dir}")
     
-    def check_psql_available(self) -> bool:
-        """Check if psql command is available"""
+    def get_db_connection(self):
+        """Get database connection using psycopg2"""
         try:
-            subprocess.run(['psql', '--version'], capture_output=True, check=True)
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
+            conn = psycopg2.connect(self.database_url)
+            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            return conn
+        except Exception as e:
+            logger.error(f"Failed to connect to database: {e}")
+            raise
     
     def create_migration_tracking_table(self) -> bool:
         """Create table to track which migrations have been applied"""
@@ -58,13 +61,13 @@ class MigrationRunner:
         """
         
         try:
-            result = subprocess.run([
-                'psql', self.database_url, '-c', sql
-            ], capture_output=True, text=True, check=True)
+            with self.get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
             logger.info(f"Migration tracking table ready in {self.schema} schema")
             return True
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to create migration tracking table: {e.stderr}")
+        except Exception as e:
+            logger.error(f"Failed to create migration tracking table: {e}")
             return False
     
     def is_migration_applied(self, migration_name: str) -> bool:
@@ -72,13 +75,13 @@ class MigrationRunner:
         sql = f"SELECT COUNT(*) FROM {self.schema}.migration_history WHERE migration_name = '{migration_name}' AND success = TRUE;"
         
         try:
-            result = subprocess.run([
-                'psql', self.database_url, '-t', '-c', sql
-            ], capture_output=True, text=True, check=True)
-            
-            count = int(result.stdout.strip())
-            return count > 0
-        except (subprocess.CalledProcessError, ValueError):
+            with self.get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
+                    result = cursor.fetchone()
+                    count = int(result[0]) if result else 0
+                    return count > 0
+        except Exception:
             return False
     
     def mark_migration_applied(self, migration_name: str, success: bool = True) -> None:
@@ -91,11 +94,11 @@ class MigrationRunner:
         """
         
         try:
-            subprocess.run([
-                'psql', self.database_url, '-c', sql
-            ], capture_output=True, text=True, check=True)
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Failed to mark migration {migration_name}: {e.stderr}")
+            with self.get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(sql)
+        except Exception as e:
+            logger.warning(f"Failed to mark migration {migration_name}: {e}")
     
     def run_migration_file(self, file_path: Path, description: str) -> bool:
         """Run a single migration file"""
@@ -119,24 +122,20 @@ class MigrationRunner:
             processed_sql = migration_sql.replace('TARGET_SCHEMA', self.schema)
             
             # Execute the processed SQL
-            result = subprocess.run([
-                'psql', self.database_url, '-c', processed_sql
-            ], capture_output=True, text=True, check=True)
+            with self.get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(processed_sql)
             
             # Mark as successful
             self.mark_migration_applied(migration_name, True)
             logger.info(f"Success: {description}")
             return True
             
-        except subprocess.CalledProcessError as e:
+        except Exception as e:
             logger.error(f"Failed: {description}")
-            logger.error(f"Error output: {e.stderr}")
+            logger.error(f"Error: {e}")
             
             # Mark as failed
-            self.mark_migration_applied(migration_name, False)
-            return False
-        except Exception as e:
-            logger.error(f"Failed to read migration file: {str(e)}")
             self.mark_migration_applied(migration_name, False)
             return False
     
@@ -166,8 +165,12 @@ class MigrationRunner:
         logger.info("=" * 50)
         
         # Check prerequisites
-        if not self.check_psql_available():
-            logger.error("psql command not available. Install postgresql-client.")
+        # Test database connection
+        try:
+            with self.get_db_connection() as conn:
+                logger.info("Database connection successful")
+        except Exception as e:
+            logger.error(f"Database connection failed: {e}")
             return False
         
         # Create migration tracking table

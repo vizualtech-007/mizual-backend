@@ -1,0 +1,72 @@
+name: Deploy to Lightsail
+on:
+  push:
+    branches: [main, lightsail]  # main = production, other branches = preview
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Deploy to Lightsail
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ubuntu
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            # Set deployment environment based on branch
+            if [ "${{ github.ref_name }}" = "main" ]; then
+              DEPLOY_ENV="production"
+              echo "Deploying PRODUCTION environment (main branch)"
+            else
+              DEPLOY_ENV="preview"
+              echo "Deploying PREVIEW environment (${{ github.ref_name }} branch)"
+            fi
+            
+            # Preserve environment files
+            if [ -f /opt/mizual/.env.production ]; then
+              cp /opt/mizual/.env.production /tmp/.env.production.backup
+            fi
+            if [ -f /opt/mizual/.env.preview ]; then
+              cp /opt/mizual/.env.preview /tmp/.env.preview.backup
+            fi
+            
+            # Clean setup
+            sudo rm -rf /opt/mizual
+            sudo mkdir -p /opt/mizual
+            sudo chown ubuntu:ubuntu /opt/mizual
+            cd /opt/mizual
+            git clone https://github.com/vizualtech-007/mizual-backend.git .
+            git checkout ${{ github.ref_name }}
+            
+            # Restore environment files
+            if [ -f /tmp/.env.production.backup ]; then
+              cp /tmp/.env.production.backup .env.production
+              echo "Restored .env.production"
+            else
+              echo "Warning: .env.production backup not found"
+            fi
+            if [ -f /tmp/.env.preview.backup ]; then
+              cp /tmp/.env.preview.backup .env.preview
+              echo "Restored .env.preview"
+            else
+              echo "Warning: .env.preview backup not found"
+            fi
+            
+            # Deploy with specified environment
+            DEPLOY_ENV=$DEPLOY_ENV docker compose -f docker-compose.prod.yml pull
+            DEPLOY_ENV=$DEPLOY_ENV docker compose -f docker-compose.prod.yml up -d --build
+            
+      - name: Health Check
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ubuntu
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            sleep 30
+            curl -f http://localhost:80/health || exit 1
+            echo "Production deployment successful!"

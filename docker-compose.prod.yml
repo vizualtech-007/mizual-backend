@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
+    networks:
+      - mizual-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  migration:
+    build: .
+    environment:
+      - TZ=Asia/Kolkata
+    env_file:
+      - .env.${DEPLOY_ENV:-production}
+    command: python migrate.py
+    networks:
+      - mizual-network
+    restart: "no"
+
+  backend:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    ports:
+      - "80:8000"
+    environment:
+      - TZ=Asia/Kolkata
+    env_file:
+      - .env.${DEPLOY_ENV:-production}
+    networks:
+      - mizual-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+        reservations:
+          memory: 400M
+
+  celery:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      - TZ=Asia/Kolkata
+    env_file:
+      - .env.${DEPLOY_ENV:-production}
+    command: celery -A src.tasks.celery worker --loglevel=warning --concurrency=1 -E --prefetch-multiplier=1 --max-tasks-per-child=50
+    networks:
+      - mizual-network
+    healthcheck:
+      test: ["CMD", "celery", "-A", "src.tasks.celery", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 600M
+
+  logs:
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DOZZLE_NO_ANALYTICS=true
+    networks:
+      - mizual-network
+
+  monitoring:
+    image: gcr.io/cadvisor/cadvisor:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - mizual-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  mizual-network:
+    driver: bridge
