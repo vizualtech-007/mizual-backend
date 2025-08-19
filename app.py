@@ -37,11 +37,32 @@ app = FastAPI()
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Environment-aware CORS configuration
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
+
+if ENVIRONMENT == "preview":
+    # Dev/Preview environment - allow common development URLs
+    allowed_origins = [
+        "http://localhost:3000",
+        "https://mizual-frontend-dev.vercel.app",
+        "https://preview.mizual.ai",
+        # Allow all Vercel preview deployments (regex pattern for CORS)
+        "https://mizual-frontend-git-dev-*.vercel.app",
+        "https://mizual-frontend-*.vercel.app"
+    ]
+else:
+    # Production environment - restrict to production URLs only
+    allowed_origins = [
+        "https://mizual.ai",
+        "https://www.mizual.ai",
+        "https://mizual-frontend-git-main-*.vercel.app"  # Allow main branch Vercel deployments
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for now (can be restricted later)
-    allow_credentials=False,  # Set to False when using allow_origins=["*"]
-    allow_methods=["*"],
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
