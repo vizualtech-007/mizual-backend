@@ -41,15 +41,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 
 if ENVIRONMENT == "preview":
-    # Dev/Preview environment - allow common development URLs
-    allowed_origins = [
-        "http://localhost:3000",
-        "https://mizual-frontend-dev.vercel.app",
-        "https://preview.mizual.ai",
-        # Allow all Vercel preview deployments (regex pattern for CORS)
-        "https://mizual-frontend-git-dev-*.vercel.app",
-        "https://mizual-frontend-*.vercel.app"
-    ]
+    # Dev/Preview environment - allow all origins for development
+    # This is safe for preview environment as it's not production
+    allowed_origins = ["*"]
 else:
     # Production environment - restrict to production URLs only
     allowed_origins = [
@@ -61,7 +55,7 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=False if ENVIRONMENT == "preview" else True,  # Can't use credentials with allow_origins=["*"]
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
