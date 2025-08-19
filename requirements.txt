@@ -7,3 +7,8 @@ sqlalchemy
 psycopg2-binary
 celery
 redis
+slowapi
+google-generativeai>=0.3.0
+python-dotenv
+Pillow
+openai>=1.0.0
