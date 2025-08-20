@@ -53,7 +53,11 @@ services:
       - key: LLM_MAX_IMAGE_DIMENSION
         value: 1024
       - key: LLM_TIMEOUT
-        value: 5
+        value: 30
+      - key: CELERY_WORKER_MEMORY_LIMIT
+        value: 200MB
+      - key: MAX_WORKERS
+        value: 1
       - key: UNSUPPORTED_IMAGE_TYPES
         value: heic,avif,gif
 

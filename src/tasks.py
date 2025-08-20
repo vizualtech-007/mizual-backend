@@ -13,7 +13,13 @@ backend_url = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 # Add environment prefix for Redis keys
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 redis_prefix = f"{ENVIRONMENT}:"
+
+# Environment-aware memory configuration
+MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "5" if ENVIRONMENT == "production" else "1"))
+CELERY_MEMORY_LIMIT = os.environ.get("CELERY_WORKER_MEMORY_LIMIT", "1GB" if ENVIRONMENT == "production" else "200MB")
+
 logger.info(f"Initializing Celery with environment: {ENVIRONMENT}, redis_prefix: {redis_prefix}")
+logger.info(f"Resource configuration - MAX_WORKERS: {MAX_WORKERS}, MEMORY_LIMIT: {CELERY_MEMORY_LIMIT}")
 
 # For rediss:// URLs, add the required SSL parameter that Celery expects
 if broker_url.startswith('rediss://'):
