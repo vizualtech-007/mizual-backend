@@ -312,6 +312,7 @@ def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(data
         "is_complete": progress_info["is_complete"],
         "is_error": progress_info["is_error"],
         "edited_image_url": db_edit.edited_image_url,
+        "prompt": db_edit.prompt,
         "created_at": db_edit.created_at
     }
 
