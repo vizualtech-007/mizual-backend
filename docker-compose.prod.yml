@@ -28,6 +28,7 @@ services:
 
   backend:
     build: .
+    platform: linux/amd64
     restart: unless-stopped
     depends_on:
       redis:
