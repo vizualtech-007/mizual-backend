@@ -31,7 +31,7 @@ engine = create_engine(
     echo=False,
     # Disable prepared statement caching to fix PgBouncer/Supabase compatibility
     execution_options={
-        "compiled_cache": {},
+        "compiled_cache": None,
         "prepared_statement_cache_size": 0
     }
 )
@@ -63,7 +63,7 @@ def get_db_with_retry(max_retries=3):
                 db.close()
             if attempt == max_retries - 1:
                 raise e
-            from src.logger import logger
+            from .logger import logger
             logger.warning(f"DATABASE CONNECTION RETRY: Attempt {attempt + 1}/{max_retries} failed: {e}")
             import time
             time.sleep(2 ** attempt)  # Exponential backoff
