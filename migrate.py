@@ -9,8 +9,8 @@ import sys
 import logging
 from pathlib import Path
 from typing import List, Tuple
-import psycopg2
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+import psycopg
+from psycopg import sql
 
 # Configure logging
 logging.basicConfig(
@@ -38,10 +38,9 @@ class MigrationRunner:
             raise FileNotFoundError(f"Migrations directory not found: {self.migrations_dir}")
     
     def get_db_connection(self):
-        """Get database connection using psycopg2"""
+        """Get database connection using psycopg"""
         try:
-            conn = psycopg2.connect(self.database_url)
-            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            conn = psycopg.connect(self.database_url, autocommit=True)
             return conn
         except Exception as e:
             logger.error(f"Failed to connect to database: {e}")
