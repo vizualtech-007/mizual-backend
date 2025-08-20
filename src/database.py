@@ -31,7 +31,7 @@ engine = create_engine(
     echo=False,
     # Disable prepared statement caching to fix PgBouncer/Supabase compatibility
     execution_options={
-        "compiled_cache": {},
+        "compiled_cache": None,
         "prepared_statement_cache_size": 0
     }
 )
