@@ -1,14 +1,14 @@
 fastapi
 uvicorn
+gunicorn
 python-multipart
 httpx
 boto3
 sqlalchemy
-psycopg2-binary
+psycopg[binary]
 celery
 redis
 slowapi
 google-generativeai>=0.3.0
 python-dotenv
-Pillow
-openai>=1.0.0
+pyvips==2.2.1

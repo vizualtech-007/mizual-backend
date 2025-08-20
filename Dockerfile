@@ -1,14 +1,16 @@
 # Multi-stage Dockerfile for FastAPI
-FROM python:3.11-slim AS base
+FROM python:3.11-alpine AS base
 
 # Set working directory
 WORKDIR /code
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies (including PyVips dependencies)
+RUN apk update && apk add --no-cache \
     gcc \
+    musl-dev \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    vips-dev \
+    && rm -rf /var/cache/apk/*
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .

@@ -9,8 +9,8 @@ import sys
 import logging
 from pathlib import Path
 from typing import List, Tuple
-import psycopg2
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+import psycopg
+from psycopg import sql
 
 # Configure logging
 logging.basicConfig(
@@ -25,6 +25,9 @@ class MigrationRunner:
         if not self.database_url:
             raise ValueError("DATABASE_URL environment variable not found")
         
+        # Keep original URL for psycopg.connect() - it doesn't need the +psycopg suffix
+        # The +psycopg suffix is only needed for SQLAlchemy
+        
         # Get environment to determine schema
         self.environment = os.getenv('ENVIRONMENT', 'production')
         self.schema = 'preview' if self.environment == 'preview' else 'public'
@@ -38,10 +41,9 @@ class MigrationRunner:
             raise FileNotFoundError(f"Migrations directory not found: {self.migrations_dir}")
     
     def get_db_connection(self):
-        """Get database connection using psycopg2"""
+        """Get database connection using psycopg"""
         try:
-            conn = psycopg2.connect(self.database_url)
-            conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+            conn = psycopg.connect(self.database_url, autocommit=True)
             return conn
         except Exception as e:
             logger.error(f"Failed to connect to database: {e}")

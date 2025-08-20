@@ -7,6 +7,7 @@ import base64
 from io import BytesIO
 from openai import OpenAI
 from .base import BaseLLMProvider
+from ..logger import logger
 
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI implementation of LLM Provider"""
@@ -19,18 +20,18 @@ class OpenAIProvider(BaseLLMProvider):
         # Get OpenAI-specific configuration
         api_key = os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            print("Error: OpenAI API key not found in environment variables")
+            logger.info("Error: OpenAI API key not found in environment variables")
             raise ValueError("OpenAI API key not found. Set LLM_API_KEY or OPENAI_API_KEY")
         
         self.model_name = os.environ.get("LLM_MODEL", "gpt-4o")
-        print(f"Using OpenAI model: {self.model_name}")
+        logger.info(f"Using OpenAI model: {self.model_name}")
         
         # Configure OpenAI client
         try:
             self.client = OpenAI(api_key=api_key)
-            print(f"Successfully initialized OpenAI client")
+            logger.info(f"Successfully initialized OpenAI client")
         except Exception as e:
-            print(f"Error initializing OpenAI client: {str(e)}")
+            logger.info(f"Error initializing OpenAI client: {str(e)}")
             raise
     
     def enhance_prompt(self, prompt, image_data):
@@ -44,7 +45,7 @@ class OpenAIProvider(BaseLLMProvider):
         Returns:
             str: The enhanced prompt
         """
-        print(f"Enhancing prompt with OpenAI: '{prompt}'")
+        logger.info(f"Enhancing prompt with OpenAI: '{prompt}'")
         
         try:
             # Resize image
@@ -192,15 +193,15 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
             
             if final_prompt:
                 # Log success
-                print(f"OpenAI enhancement completed")
-                print(f"Original prompt: '{prompt}'")
-                print(f"Enhanced prompt: '{final_prompt}'")
+                logger.info(f"OpenAI enhancement completed")
+                logger.info(f"Original prompt: '{prompt}'")
+                logger.info(f"Enhanced prompt: '{final_prompt}'")
                 return final_prompt
             else:
-                print(f"Could not extract final prompt from OpenAI response")
+                logger.info(f"Could not extract final prompt from OpenAI response")
                 return None
             
         except Exception as e:
-            print(f"OpenAI enhancement failed: {str(e)}")
+            logger.info(f"OpenAI enhancement failed: {str(e)}")
             # Return None to indicate failure - will fall back to original prompt
             return None

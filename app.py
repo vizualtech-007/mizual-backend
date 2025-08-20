@@ -13,6 +13,7 @@ from src.database import engine
 import uuid
 import base64
 import os
+from src.logger import logger
 
 # Import LLM provider factory
 try:
@@ -28,6 +29,10 @@ models.Base.metadata.create_all(bind=engine)
 RATE_LIMIT_DAILY_IMAGES = os.environ.get("RATE_LIMIT_DAILY_IMAGES", "3")
 RATE_LIMIT_BURST_SECONDS = os.environ.get("RATE_LIMIT_BURST_SECONDS", "10")
 RATE_LIMIT_STATUS_CHECKS_PER_MINUTE = os.environ.get("RATE_LIMIT_STATUS_CHECKS_PER_MINUTE", "30")
+
+# Image type validation configuration
+UNSUPPORTED_IMAGE_TYPES = os.environ.get("UNSUPPORTED_IMAGE_TYPES", "heic,avif,gif").lower().split(",")
+UNSUPPORTED_IMAGE_TYPES = [img_type.strip() for img_type in UNSUPPORTED_IMAGE_TYPES if img_type.strip()]
 
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
@@ -65,11 +70,51 @@ class EditImageRequest(BaseModel):
     image: str
     parent_edit_uuid: Optional[str] = None  # For follow-up editing
 
+def detect_image_type(image_bytes: bytes) -> str:
+    """Detect image type from image bytes using magic bytes"""
+    if not image_bytes:
+        return 'unknown'
+    
+    # Check magic bytes for common formats
+    if image_bytes.startswith(b'\xff\xd8\xff'):
+        return 'jpeg'
+    elif image_bytes.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png'
+    elif image_bytes.startswith(b'GIF87a') or image_bytes.startswith(b'GIF89a'):
+        return 'gif'
+    elif image_bytes.startswith(b'RIFF') and len(image_bytes) > 12 and b'WEBP' in image_bytes[:12]:
+        return 'webp'
+    elif len(image_bytes) > 32 and (b'avif' in image_bytes[:32].lower() or b'ftypavif' in image_bytes[:32]):
+        return 'avif'
+    elif len(image_bytes) > 32 and (b'heic' in image_bytes[:32].lower() or b'ftypheic' in image_bytes[:32]):
+        return 'heic'
+    # Check for BMP
+    elif image_bytes.startswith(b'BM'):
+        return 'bmp'
+    # Check for TIFF
+    elif image_bytes.startswith(b'II*\x00') or image_bytes.startswith(b'MM\x00*'):
+        return 'tiff'
+    else:
+        return 'unknown'
+
+def validate_image_type(image_bytes: bytes) -> tuple[bool, str]:
+    """Validate if image type is supported"""
+    detected_type = detect_image_type(image_bytes)
+    
+    if detected_type == 'unknown':
+        return False, "Unable to detect image format. Please upload a valid image file."
+    
+    if detected_type in UNSUPPORTED_IMAGE_TYPES:
+        supported_types = [t for t in ['jpeg', 'jpg', 'png', 'webp'] if t not in UNSUPPORTED_IMAGE_TYPES]
+        return False, f"Image format '{detected_type.upper()}' is not supported. Please use one of: {', '.join(supported_types).upper()}"
+    
+    return True, detected_type
+
 @app.on_event("startup")
 def startup_event():
     s3.create_bucket_if_not_exists()
     # Skip database migrations for now - tables are already properly set up
-    print("Startup complete - database migrations skipped")
+    logger.info("Startup complete - database migrations skipped")
 
 @app.get("/health")
 @app.head("/health")
@@ -184,10 +229,10 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         if chain_length == -1:
             raise HTTPException(status_code=400, detail="Maximum chain length of 5 edits reached")
         
-        print(f"Starting follow-up edit (chain position {chain_length + 1}) with prompt: '{edit_request.prompt}'")
-        print(f"Parent edit: {edit_request.parent_edit_uuid}")
+        logger.info(f"Starting follow-up edit (chain position {chain_length + 1}) with prompt: '{edit_request.prompt}'")
+        logger.info(f"Parent edit: {edit_request.parent_edit_uuid}")
     else:
-        print(f"Starting new edit with prompt: '{edit_request.prompt}'")
+        logger.info(f"Starting new edit with prompt: '{edit_request.prompt}'")
 
     try:
         # Decode the base64 image
@@ -196,20 +241,28 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image format: {e}")
     
+    # Validate image type
+    is_valid, validation_message = validate_image_type(image_bytes)
+    if not is_valid:
+        logger.warning(f"Image upload rejected: {validation_message}")
+        raise HTTPException(status_code=400, detail=validation_message)
+    
+    logger.info(f"Image type validated: {validation_message}")
+    
     original_file_name = f"original-{uuid.uuid4()}.png"
     
     try:
         # Optimized S3 upload with better performance
         original_image_url = s3.upload_file_to_s3(image_bytes, original_file_name)
-        print(f"Uploaded original image to: {original_image_url}")
+        logger.info(f"Uploaded original image to: {original_image_url}")
         
     except Exception as e:
-        print(f"Failed to upload original image to S3: {str(e)}")
+        logger.error(f"Failed to upload original image to S3: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to upload original image to S3: {e}")
 
     # Skip prompt enhancement in API - moved to Celery task for instant response
     original_prompt = edit_request.prompt
-    print("Prompt enhancement moved to Celery task for faster API response")
+    logger.info("Prompt enhancement moved to Celery task for faster API response")
 
     # Create database record with original prompt only (enhanced_prompt will be added by Celery)
     edit = crud.create_edit(
@@ -222,18 +275,18 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     
     # Update status immediately to show progress to user - INSTANT FEEDBACK
     crud.update_edit_status(db, edit.id, "processing")
-    print(f"API: Setting processing stage to 'enhancing_prompt' for edit {edit.id}")
+    logger.info(f"API: Setting processing stage to 'enhancing_prompt' for edit {edit.id}")
     crud.update_edit_processing_stage(db, edit.id, "enhancing_prompt")  # Show enhancing_prompt immediately
-    print(f"API: Stage updated successfully for edit {edit.id}")
+    logger.info(f"API: Stage updated successfully for edit {edit.id}")
     
     # Verify the update worked
     updated_edit = crud.get_edit(db, edit.id)
-    print(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
+    logger.info(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
     
     # Process the image edit asynchronously with the final prompt
     tasks.celery.send_task('src.tasks.process_image_edit', args=[edit.id])
     
-    print(f"Edit request queued for processing with UUID: {edit.uuid}")
+    logger.info(f"Edit request queued for processing with UUID: {edit.uuid}")
 
     polling_url = str(request.url_for('get_edit_status', edit_uuid=edit.uuid))
 
@@ -260,6 +313,7 @@ def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(data
         "is_complete": progress_info["is_complete"],
         "is_error": progress_info["is_error"],
         "edited_image_url": db_edit.edited_image_url,
+        "prompt": db_edit.prompt,
         "created_at": db_edit.created_at
     }
 
@@ -291,9 +345,9 @@ async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate, db
         raise HTTPException(status_code=500, detail="Failed to create feedback")
     
     rating_text = "thumbs up" if feedback.rating == 1 else "thumbs down"
-    print(f"Feedback submitted for edit {feedback.edit_uuid}: {rating_text} ({feedback.rating})")
+    logger.info(f"Feedback submitted for edit {feedback.edit_uuid}: {rating_text} ({feedback.rating})")
     if feedback.feedback_text:
-        print(f"Feedback text: {feedback.feedback_text[:100]}...")  # Log first 100 chars
+        logger.info(f"Feedback text: {feedback.feedback_text[:100]}...")  # Log first 100 chars
     
     return {
         "success": True,

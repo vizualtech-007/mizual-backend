@@ -175,3 +175,5 @@ images/
 storage/
 .env.production
 .env.preview
+*.bak
+.env.dev

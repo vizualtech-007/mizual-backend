@@ -12,9 +12,10 @@ Categories: env, database, redis, storage, api
 """
 
 import os
+from src.logger import logger
 import sys
 import asyncio
-import psycopg2
+import psycopg
 import redis
 import boto3
 from botocore.exceptions import ClientError
@@ -25,18 +26,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def print_header(title):
-    print(f"\n{'='*50}")
-    print(f"🔍 {title}")
-    print(f"{'='*50}")
+    logger.info(f"\n{'='*50}")
+    logger.info(f"🔍 {title}")
+    logger.info(f"{'='*50}")
 
 def print_success(message):
-    print(f"✅ {message}")
+    logger.info(f"✅ {message}")
 
 def print_error(message):
-    print(f"❌ {message}")
+    logger.info(f"❌ {message}")
 
 def print_info(message):
-    print(f"ℹ️  {message}")
+    logger.info(f"ℹ️  {message}")
 
 def test_environment_variables():
     """Test environment variables"""
@@ -78,11 +79,14 @@ def test_database_connection():
         print_error("DATABASE_URL not set")
         return False
     
+    # Keep original URL for psycopg.connect() - it doesn't need the +psycopg suffix
+    # The +psycopg suffix is only needed for SQLAlchemy
+    
     print_info(f"Connecting to: {database_url[:50]}...")
     
     try:
         # Test connection with SSL settings for Supabase
-        conn = psycopg2.connect(database_url, sslmode='require')
+        conn = psycopg.connect(database_url, autocommit=True)
         cursor = conn.cursor()
         
         # Test query
@@ -325,7 +329,7 @@ async def run_all_tests():
         else:
             result = category['test']()
         results[category['name']] = result
-        print()  # Add spacing between tests
+        logger.info()  # Add spacing between tests
     
     print_header("SUMMARY")
     all_passed = True
@@ -345,20 +349,20 @@ async def run_all_tests():
 
 def show_usage():
     """Show usage instructions"""
-    print("Usage:")
-    print("  python debug_connections.py                    # Test all connections")
-    print("  python debug_connections.py <category>         # Test specific category")
-    print("  python debug_connections.py --help             # Show this help")
-    print()
-    print("Available categories:")
+    logger.info("Usage:")
+    logger.info("  python debug_connections.py                    # Test all connections")
+    logger.info("  python debug_connections.py <category>         # Test specific category")
+    logger.info("  python debug_connections.py --help             # Show this help")
+    logger.info()
+    logger.info("Available categories:")
     for key, category in CATEGORIES.items():
-        print(f"  {key:<10} - {category['name']}")
-    print()
-    print("Examples:")
-    print("  python debug_connections.py env               # Test only environment variables")
-    print("  python debug_connections.py database          # Test only database")
-    print("  python debug_connections.py storage           # Test only S3 storage")
-    print("  python debug_connections.py api               # Test only BFL API")
+        logger.info(f"  {key:<10} - {category['name']}")
+    logger.info()
+    logger.info("Examples:")
+    logger.info("  python debug_connections.py env               # Test only environment variables")
+    logger.info("  python debug_connections.py database          # Test only database")
+    logger.info("  python debug_connections.py storage           # Test only S3 storage")
+    logger.info("  python debug_connections.py api               # Test only BFL API")
 
 async def main():
     """Main function with category support"""

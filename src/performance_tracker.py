@@ -6,6 +6,7 @@ Tracks timing for each stage and overall process duration.
 import time
 from typing import Dict, Optional
 from datetime import datetime, timezone
+from .logger import logger
 
 
 class PerformanceTracker:
@@ -18,7 +19,7 @@ class PerformanceTracker:
         self.current_stage_start: Optional[float] = None
         
         # Log the start of tracking
-        print(f"PERFORMANCE TRACKER STARTED: edit_id={edit_id}, uuid={edit_uuid}, timestamp={datetime.now(timezone.utc).isoformat()}")
+        logger.info(f"PERFORMANCE TRACKER STARTED: edit_id={edit_id}, uuid={edit_uuid}, timestamp={datetime.now(timezone.utc).isoformat()}")
     
     def start_stage(self, stage_name: str):
         """Start timing a new stage"""
@@ -31,16 +32,16 @@ class PerformanceTracker:
         self.current_stage_start = time.time()
         
         elapsed_total = self.current_stage_start - self.start_time
-        print(f"STAGE STARTED: edit_id={self.edit_id}, stage={stage_name}, total_elapsed={elapsed_total:.3f}s")
+        logger.info(f"STAGE STARTED: edit_id={self.edit_id}, stage={stage_name}, total_elapsed={elapsed_total:.3f}s")
     
     def end_stage(self, stage_name: str):
         """End timing for a stage"""
         if self.current_stage != stage_name:
-            print(f"WARNING: Stage mismatch. Expected {self.current_stage}, got {stage_name}")
+            logger.warning(f"WARNING: Stage mismatch. Expected {self.current_stage}, got {stage_name}")
             return
         
         if not self.current_stage_start:
-            print(f"WARNING: No start time for stage {stage_name}")
+            logger.warning(f"WARNING: No start time for stage {stage_name}")
             return
         
         end_time = time.time()
@@ -55,7 +56,7 @@ class PerformanceTracker:
             'total_elapsed_at_end': total_elapsed
         }
         
-        print(f"STAGE COMPLETED: edit_id={self.edit_id}, stage={stage_name}, duration={stage_duration:.3f}s, total_elapsed={total_elapsed:.3f}s")
+        logger.info(f"STAGE COMPLETED: edit_id={self.edit_id}, stage={stage_name}, duration={stage_duration:.3f}s, total_elapsed={total_elapsed:.3f}s")
         
         # Clear current stage
         self.current_stage = None
@@ -65,7 +66,7 @@ class PerformanceTracker:
         """Log a milestone without starting/ending stages"""
         elapsed = time.time() - self.start_time
         info_str = f", {additional_info}" if additional_info else ""
-        print(f"MILESTONE: edit_id={self.edit_id}, milestone={milestone}, total_elapsed={elapsed:.3f}s{info_str}")
+        logger.info(f"MILESTONE: edit_id={self.edit_id}, milestone={milestone}, total_elapsed={elapsed:.3f}s{info_str}")
     
     def finish_tracking(self, final_status: str):
         """Finish tracking and log final summary"""
@@ -75,22 +76,22 @@ class PerformanceTracker:
         
         total_time = time.time() - self.start_time
         
-        print(f"PERFORMANCE SUMMARY START: edit_id={self.edit_id}, uuid={self.edit_uuid}")
-        print(f"TOTAL TIME: {total_time:.3f}s, FINAL STATUS: {final_status}")
+        logger.info(f"PERFORMANCE SUMMARY START: edit_id={self.edit_id}, uuid={self.edit_uuid}")
+        logger.info(f"TOTAL TIME: {total_time:.3f}s, FINAL STATUS: {final_status}")
         
         # Log each stage duration
         for stage_name, timing in self.stage_times.items():
             duration = timing['duration']
             percentage = (duration / total_time) * 100
-            print(f"STAGE TIMING: {stage_name}={duration:.3f}s ({percentage:.1f}%)")
+            logger.info(f"STAGE TIMING: {stage_name}={duration:.3f}s ({percentage:.1f}%)")
         
         # Calculate untracked time
         tracked_time = sum(timing['duration'] for timing in self.stage_times.values())
         untracked_time = total_time - tracked_time
         untracked_percentage = (untracked_time / total_time) * 100
         
-        print(f"UNTRACKED TIME: {untracked_time:.3f}s ({untracked_percentage:.1f}%)")
-        print(f"PERFORMANCE SUMMARY END: edit_id={self.edit_id}")
+        logger.info(f"UNTRACKED TIME: {untracked_time:.3f}s ({untracked_percentage:.1f}%)")
+        logger.info(f"PERFORMANCE SUMMARY END: edit_id={self.edit_id}")
         
         return {
             'edit_id': self.edit_id,
