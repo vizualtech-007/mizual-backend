@@ -28,11 +28,21 @@ if broker_url.startswith('rediss://'):
 if backend_url.startswith('rediss://'):
     backend_url = backend_url + ('&' if '?' in backend_url else '?') + 'ssl_cert_reqs=none'
 
+# Environment-aware broker configuration
+if ENVIRONMENT == "preview":
+    # Dev environment (Render Free Tier) - less aggressive polling
+    broker_transport_options = {'polling_interval': 5.0}  # 5 seconds
+    logger.info("Using dev-friendly polling interval: 5.0 seconds")
+else:
+    # Production environment - fast polling for responsiveness
+    broker_transport_options = {'polling_interval': 0.1}  # 0.1 seconds
+    logger.info("Using production polling interval: 0.1 seconds")
+
 celery = Celery(
     __name__,
     broker=broker_url,
     backend=backend_url,
-    broker_transport_options={'polling_interval': 0.1}
+    broker_transport_options=broker_transport_options
 )
 
 @celery.task(name='src.tasks.process_image_edit', soft_time_limit=600, time_limit=660)
