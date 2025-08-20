@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for FastAPI
-FROM python:3.13-alpine AS base
+FROM python:3.11.9-alpine AS base
 
 # Set working directory
 WORKDIR /code
