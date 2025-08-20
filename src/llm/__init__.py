@@ -4,18 +4,19 @@ Provides a factory pattern for selecting and configuring LLM providers
 """
 
 import os
+from ..logger import logger
 
 # Import providers
 try:
     from .gemini_provider import GeminiProvider
 except ImportError:
-    print("Warning: Gemini provider not available - missing dependencies")
+    logger.info("Warning: Gemini provider not available - missing dependencies")
     GeminiProvider = None
 
 try:
     from .openai_provider import OpenAIProvider
 except ImportError:
-    print("Warning: OpenAI provider not available - missing dependencies")
+    logger.info("Warning: OpenAI provider not available - missing dependencies")
     OpenAIProvider = None
 
 def get_provider():
@@ -31,27 +32,27 @@ def get_provider():
     """
     # Check if prompt enhancement is enabled
     if not os.environ.get("ENABLE_PROMPT_ENHANCEMENT", "true").lower() in ["true", "1", "yes"]:
-        print("Prompt enhancement is disabled")
+        logger.info("Prompt enhancement is disabled")
         return None
     
     # Get provider from environment
     provider_name = os.environ.get("LLM_PROVIDER", "gemini").lower()
-    print(f"Initializing LLM provider: {provider_name}")
+    logger.info(f"Initializing LLM provider: {provider_name}")
     
     # Select provider based on configuration
     if provider_name == "gemini":
         if GeminiProvider is None:
-            print("Error: Gemini provider requested but dependencies not available")
+            logger.info("Error: Gemini provider requested but dependencies not available")
             raise ImportError("Gemini dependencies not installed. Run: pip install google-generativeai")
         return GeminiProvider()
     
     elif provider_name == "openai":
         if OpenAIProvider is None:
-            print("Error: OpenAI provider requested but dependencies not available")
+            logger.info("Error: OpenAI provider requested but dependencies not available")
             raise ImportError("OpenAI dependencies not installed. Run: pip install openai>=1.0.0")
         return OpenAIProvider()
     
     else:
-        print(f"Error: Unsupported LLM provider: {provider_name}")
+        logger.error(f"Error: Unsupported LLM provider: {provider_name}")
         raise ValueError(f"Unsupported LLM provider: {provider_name}. " 
                          f"Supported providers: gemini, openai")
