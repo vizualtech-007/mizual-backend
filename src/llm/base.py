@@ -62,7 +62,7 @@ class BaseLLMProvider(ABC):
             
             # Export to bytes with optimization
             # Use JPEG with 85% quality for good balance of size/quality
-            resized_bytes = resized_image.write_to_buffer('.jpg[Q=85,optimize]')
+            resized_bytes = resized_image.write_to_buffer('.jpg', Q=85, optimize_coding=True)
             
             print(f"PYVIPS: Successfully resized image from {width}x{height} to {resized_image.width}x{resized_image.height}")
             print(f"PYVIPS: Original size: {len(image_data)} bytes, Resized size: {len(resized_bytes)} bytes")
