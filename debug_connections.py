@@ -79,9 +79,8 @@ def test_database_connection():
         print_error("DATABASE_URL not set")
         return False
     
-    # Convert postgresql:// to postgresql+psycopg:// to use psycopg driver instead of psycopg2
-    if database_url.startswith("postgresql://"):
-        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    # Keep original URL for psycopg.connect() - it doesn't need the +psycopg suffix
+    # The +psycopg suffix is only needed for SQLAlchemy
     
     print_info(f"Connecting to: {database_url[:50]}...")
     
