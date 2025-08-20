@@ -25,6 +25,10 @@ class MigrationRunner:
         if not self.database_url:
             raise ValueError("DATABASE_URL environment variable not found")
         
+        # Convert postgresql:// to postgresql+psycopg:// to use psycopg driver instead of psycopg2
+        if self.database_url.startswith("postgresql://"):
+            self.database_url = self.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+        
         # Get environment to determine schema
         self.environment = os.getenv('ENVIRONMENT', 'production')
         self.schema = 'preview' if self.environment == 'preview' else 'public'

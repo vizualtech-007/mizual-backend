@@ -15,7 +15,7 @@ import os
 from src.logger import logger
 import sys
 import asyncio
-import psycopg2
+import psycopg
 import redis
 import boto3
 from botocore.exceptions import ClientError
@@ -79,11 +79,15 @@ def test_database_connection():
         print_error("DATABASE_URL not set")
         return False
     
+    # Convert postgresql:// to postgresql+psycopg:// to use psycopg driver instead of psycopg2
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    
     print_info(f"Connecting to: {database_url[:50]}...")
     
     try:
         # Test connection with SSL settings for Supabase
-        conn = psycopg2.connect(database_url, sslmode='require')
+        conn = psycopg.connect(database_url, autocommit=True)
         cursor = conn.cursor()
         
         # Test query

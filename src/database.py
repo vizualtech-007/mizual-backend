@@ -5,6 +5,10 @@ from sqlalchemy.pool import QueuePool
 import os
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://user:password@localhost/db")
+
+# Convert postgresql:// to postgresql+psycopg:// to use psycopg driver instead of psycopg2
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 
 # Add schema to connection based on environment
