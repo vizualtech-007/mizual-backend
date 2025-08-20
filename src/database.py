@@ -15,8 +15,7 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 schema_name = "preview" if ENVIRONMENT == "preview" else "public"
 connect_args = {
     "sslmode": "require",
-    "options": f"-csearch_path={schema_name},public",
-    "prepare_threshold": 0
+    "options": f"-csearch_path={schema_name},public"
 }
 
 # Optimized connection pool configuration for performance
@@ -30,11 +29,8 @@ engine = create_engine(
     pool_recycle=1800,   # Faster recycle (30 minutes)
     pool_timeout=10,     # Faster timeout
     echo=False,
-    # Disable prepared statement caching to fix PgBouncer/Supabase compatibility
-    execution_options={
-        "compiled_cache": None,
-        "prepared_statement_cache_size": 0
-    }
+    # Disable prepared statement caching to fix PgBouncer compatibility
+    execution_options={"prepared_statement_cache_size": 0}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -64,7 +60,7 @@ def get_db_with_retry(max_retries=3):
                 db.close()
             if attempt == max_retries - 1:
                 raise e
-            from .logger import logger
+            from src.logger import logger
             logger.warning(f"DATABASE CONNECTION RETRY: Attempt {attempt + 1}/{max_retries} failed: {e}")
             import time
             time.sleep(2 ** attempt)  # Exponential backoff

@@ -11,6 +11,7 @@ RUN apk update && apk add --no-cache \
     musl-dev \
     curl \
     vips-dev \
+    libheif-dev \
     libffi-dev \
     pkgconfig \
     && rm -rf /var/cache/apk/*
