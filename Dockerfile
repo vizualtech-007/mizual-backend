@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for FastAPI
-FROM python:3.11.9-alpine AS base
+FROM python:3.11-alpine AS base
 
 # Set working directory
 WORKDIR /code
@@ -11,7 +11,6 @@ RUN apk update && apk add --no-cache \
     musl-dev \
     curl \
     vips-dev \
-    libheif-dev \
     libffi-dev \
     pkgconfig \
     && rm -rf /var/cache/apk/*
