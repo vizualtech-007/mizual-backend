@@ -30,9 +30,7 @@ engine = create_engine(
     pool_timeout=10,     # Faster timeout
     echo=False,
     # Disable client-side statement cache to fix PgBouncer/Supabase compatibility
-    statement_cache_size=0,
-    # Disable server-side prepared statement caching to fix PgBouncer compatibility
-    execution_options={"prepared_statement_cache_size": 0}
+    statement_cache_size=0
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
