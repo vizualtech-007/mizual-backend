@@ -28,7 +28,9 @@ engine = create_engine(
     pool_pre_ping=True,  # Validates connections before use
     pool_recycle=1800,   # Faster recycle (30 minutes)
     pool_timeout=10,     # Faster timeout
-    echo=False
+    echo=False,
+    # Disable prepared statement caching to fix PgBouncer compatibility
+    execution_options={"prepared_statement_cache_size": 0}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
