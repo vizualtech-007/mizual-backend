@@ -60,12 +60,12 @@ class BaseLLMProvider(ABC):
             # This automatically calculates dimensions and preserves aspect ratio
             resized_image = image.thumbnail_image(self.max_dimension)
             
-            print(f"PYVIPS: Successfully resized image from {width}x{height} to {resized_image.width}x{resized_image.height}")
-            print(f"PYVIPS: Original size: {len(image_data)} bytes, Resized size: {len(resized_bytes)} bytes")
-            
             # Export to bytes with optimization
             # Use JPEG with 85% quality for good balance of size/quality
             resized_bytes = resized_image.write_to_buffer('.jpg[Q=85,optimize]')
+            
+            print(f"PYVIPS: Successfully resized image from {width}x{height} to {resized_image.width}x{resized_image.height}")
+            print(f"PYVIPS: Original size: {len(image_data)} bytes, Resized size: {len(resized_bytes)} bytes")
             
             return resized_bytes
             
