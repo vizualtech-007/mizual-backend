@@ -48,8 +48,31 @@ class BaseLLMProvider(ABC):
             bytes: The resized image as bytes
         """
         try:
+            # Debug: Log image data characteristics
+            logger.info(f"PYVIPS DEBUG: Image data size: {len(image_data)} bytes")
+            if len(image_data) > 0:
+                # Log first few bytes to help identify format
+                header_bytes = image_data[:16]
+                header_hex = ' '.join(f'{b:02x}' for b in header_bytes)
+                logger.info(f"PYVIPS DEBUG: Image header bytes: {header_hex}")
+            
             # Load image from bytes using PyVips (streaming)
-            image = pyvips.Image.new_from_buffer(image_data, "")
+            # Try without format first, then with specific formats if that fails
+            try:
+                image = pyvips.Image.new_from_buffer(image_data, "")
+            except Exception as format_error:
+                logger.warning(f"PyVips auto-detection failed: {format_error}, trying specific formats...")
+                # Try common formats explicitly
+                for format_hint in [".jpg", ".jpeg", ".png", ".webp"]:
+                    try:
+                        image = pyvips.Image.new_from_buffer(image_data, format_hint)
+                        logger.info(f"Successfully loaded image with format hint: {format_hint}")
+                        break
+                    except Exception:
+                        continue
+                else:
+                    # If all format hints fail, re-raise the original error
+                    raise format_error
             
             # Check if resizing is needed
             width, height = image.width, image.height
