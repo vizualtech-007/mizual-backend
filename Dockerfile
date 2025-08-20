@@ -7,9 +7,12 @@ WORKDIR /code
 # Install system dependencies (including PyVips dependencies)
 RUN apk update && apk add --no-cache \
     gcc \
+    g++ \
     musl-dev \
     curl \
     vips-dev \
+    libffi-dev \
+    pkgconfig \
     && rm -rf /var/cache/apk/*
 
 # Copy requirements and install Python dependencies
@@ -39,7 +42,7 @@ FROM base AS production
 COPY . /code
 
 # Create non-root user for security
-RUN useradd --create-home --shell /bin/bash mizual
+RUN adduser -D -s /bin/sh mizual
 RUN chown -R mizual:mizual /code
 USER mizual
 
