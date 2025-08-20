@@ -13,6 +13,7 @@ from src.database import engine
 import uuid
 import base64
 import os
+from src.logger import logger
 
 # Import LLM provider factory
 try:
@@ -113,7 +114,7 @@ def validate_image_type(image_bytes: bytes) -> tuple[bool, str]:
 def startup_event():
     s3.create_bucket_if_not_exists()
     # Skip database migrations for now - tables are already properly set up
-    print("Startup complete - database migrations skipped")
+    logger.info("Startup complete - database migrations skipped")
 
 @app.get("/health")
 @app.head("/health")
@@ -228,10 +229,10 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
         if chain_length == -1:
             raise HTTPException(status_code=400, detail="Maximum chain length of 5 edits reached")
         
-        print(f"Starting follow-up edit (chain position {chain_length + 1}) with prompt: '{edit_request.prompt}'")
-        print(f"Parent edit: {edit_request.parent_edit_uuid}")
+        logger.info(f"Starting follow-up edit (chain position {chain_length + 1}) with prompt: '{edit_request.prompt}'")
+        logger.info(f"Parent edit: {edit_request.parent_edit_uuid}")
     else:
-        print(f"Starting new edit with prompt: '{edit_request.prompt}'")
+        logger.info(f"Starting new edit with prompt: '{edit_request.prompt}'")
 
     try:
         # Decode the base64 image
@@ -243,25 +244,25 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     # Validate image type
     is_valid, validation_message = validate_image_type(image_bytes)
     if not is_valid:
-        print(f"Image upload rejected: {validation_message}")
+        logger.warning(f"Image upload rejected: {validation_message}")
         raise HTTPException(status_code=400, detail=validation_message)
     
-    print(f"Image type validated: {validation_message}")
+    logger.info(f"Image type validated: {validation_message}")
     
     original_file_name = f"original-{uuid.uuid4()}.png"
     
     try:
         # Optimized S3 upload with better performance
         original_image_url = s3.upload_file_to_s3(image_bytes, original_file_name)
-        print(f"Uploaded original image to: {original_image_url}")
+        logger.info(f"Uploaded original image to: {original_image_url}")
         
     except Exception as e:
-        print(f"Failed to upload original image to S3: {str(e)}")
+        logger.error(f"Failed to upload original image to S3: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to upload original image to S3: {e}")
 
     # Skip prompt enhancement in API - moved to Celery task for instant response
     original_prompt = edit_request.prompt
-    print("Prompt enhancement moved to Celery task for faster API response")
+    logger.info("Prompt enhancement moved to Celery task for faster API response")
 
     # Create database record with original prompt only (enhanced_prompt will be added by Celery)
     edit = crud.create_edit(
@@ -274,18 +275,18 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     
     # Update status immediately to show progress to user - INSTANT FEEDBACK
     crud.update_edit_status(db, edit.id, "processing")
-    print(f"API: Setting processing stage to 'enhancing_prompt' for edit {edit.id}")
+    logger.info(f"API: Setting processing stage to 'enhancing_prompt' for edit {edit.id}")
     crud.update_edit_processing_stage(db, edit.id, "enhancing_prompt")  # Show enhancing_prompt immediately
-    print(f"API: Stage updated successfully for edit {edit.id}")
+    logger.info(f"API: Stage updated successfully for edit {edit.id}")
     
     # Verify the update worked
     updated_edit = crud.get_edit(db, edit.id)
-    print(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
+    logger.info(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
     
     # Process the image edit asynchronously with the final prompt
     tasks.celery.send_task('src.tasks.process_image_edit', args=[edit.id])
     
-    print(f"Edit request queued for processing with UUID: {edit.uuid}")
+    logger.info(f"Edit request queued for processing with UUID: {edit.uuid}")
 
     polling_url = str(request.url_for('get_edit_status', edit_uuid=edit.uuid))
 
@@ -344,9 +345,9 @@ async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate, db
         raise HTTPException(status_code=500, detail="Failed to create feedback")
     
     rating_text = "thumbs up" if feedback.rating == 1 else "thumbs down"
-    print(f"Feedback submitted for edit {feedback.edit_uuid}: {rating_text} ({feedback.rating})")
+    logger.info(f"Feedback submitted for edit {feedback.edit_uuid}: {rating_text} ({feedback.rating})")
     if feedback.feedback_text:
-        print(f"Feedback text: {feedback.feedback_text[:100]}...")  # Log first 100 chars
+        logger.info(f"Feedback text: {feedback.feedback_text[:100]}...")  # Log first 100 chars
     
     return {
         "success": True,

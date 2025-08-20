@@ -25,7 +25,7 @@ if [ "$ENVIRONMENT" = "preview" ]; then
     celery -A src.tasks.celery worker --loglevel=info --concurrency=1 -E --prefetch-multiplier=1 --max-tasks-per-child=25 &
 else
     # Production environment - optimized settings
-    celery -A src.tasks.celery worker --loglevel=warning --concurrency=2 -E --prefetch-multiplier=1 --max-tasks-per-child=50 &
+    celery -A src.tasks.celery worker --loglevel=warning --concurrency=2 -E --prefetch-multiplier=1 --max-tasks-per-child=100 &
 fi
 
 # Give Celery a moment to start and show any errors
@@ -39,6 +39,12 @@ else
     echo "WARNING: Celery worker may not have started properly"
 fi
 
-# Start FastAPI server
-echo "Starting FastAPI server on port ${PORT:-8000}..."
-uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}
+# Start FastAPI server with production configuration
+echo "Starting FastAPI server with gunicorn on port ${PORT:-8000}..."
+if [ "$ENVIRONMENT" = "preview" ]; then
+    # Preview environment - single worker for resource efficiency
+    uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}
+else
+    # Production environment - optimized gunicorn configuration
+    gunicorn -w 5 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${PORT:-8000}
+fi

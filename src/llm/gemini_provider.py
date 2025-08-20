@@ -6,6 +6,7 @@ import os
 from io import BytesIO
 import google.generativeai as genai
 from .base import BaseLLMProvider
+from ..logger import logger
 
 class GeminiProvider(BaseLLMProvider):
     """Google Gemini implementation of LLM Provider"""
@@ -18,11 +19,11 @@ class GeminiProvider(BaseLLMProvider):
         # Get Gemini-specific configuration
         api_key = os.environ.get("LLM_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if not api_key:
-            print("Error: Gemini API key not found in environment variables")
+            logger.info("Error: Gemini API key not found in environment variables")
             raise ValueError("Gemini API key not found. Set LLM_API_KEY or GOOGLE_API_KEY")
         
         self.model_name = os.environ.get("LLM_MODEL", "gemini-1.5-flash")
-        print(f"Using Gemini model: {self.model_name}")
+        logger.info(f"Using Gemini model: {self.model_name}")
         
         # Configure Gemini API
         genai.configure(api_key=api_key)
@@ -30,9 +31,9 @@ class GeminiProvider(BaseLLMProvider):
         # Get model
         try:
             self.model = genai.GenerativeModel(self.model_name)
-            print(f"Successfully initialized Gemini model: {self.model_name}")
+            logger.info(f"Successfully initialized Gemini model: {self.model_name}")
         except Exception as e:
-            print(f"Error initializing Gemini model: {str(e)}")
+            logger.info(f"Error initializing Gemini model: {str(e)}")
             raise
     
     def enhance_prompt(self, prompt, image_data):
@@ -46,7 +47,7 @@ class GeminiProvider(BaseLLMProvider):
         Returns:
             str: The enhanced prompt
         """
-        print(f"Enhancing prompt with Gemini: '{prompt}'")
+        logger.info(f"Enhancing prompt with Gemini: '{prompt}'")
         
         try:
             # Resize image using PyVips (returns bytes directly)
@@ -193,15 +194,15 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
             
             if final_prompt:
                 # Log success
-                print(f"Gemini enhancement completed")
-                print(f"Original prompt: '{prompt}'")
-                print(f"Enhanced prompt: '{final_prompt}'")
+                logger.info(f"Gemini enhancement completed")
+                logger.info(f"Original prompt: '{prompt}'")
+                logger.info(f"Enhanced prompt: '{final_prompt}'")
                 return final_prompt
             else:
-                print(f"Could not extract final prompt from Gemini response")
+                logger.info(f"Could not extract final prompt from Gemini response")
                 return None
             
         except Exception as e:
-            print(f"Gemini enhancement failed: {str(e)}")
+            logger.info(f"Gemini enhancement failed: {str(e)}")
             # Return None to indicate failure - will fall back to original prompt
             return None

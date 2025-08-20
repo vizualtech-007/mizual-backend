@@ -2,6 +2,7 @@ import boto3
 import os
 from botocore.exceptions import NoCredentialsError, ClientError
 import json
+from .logger import logger
 
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "image-edit-bucket")
 S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL") # For local development with MinIO
@@ -24,10 +25,10 @@ def create_bucket_if_not_exists():
     """Ensures the S3 bucket exists. For Backblaze B2, bucket policy is set via dashboard."""
     try:
         s3_client.head_bucket(Bucket=S3_BUCKET_NAME)
-        print(f"S3 bucket '{S3_BUCKET_NAME}' exists and is accessible")
+        logger.info(f"S3 bucket '{S3_BUCKET_NAME}' exists and is accessible")
     except ClientError as e:
         if e.response['Error']['Code'] == '404':
-            print(f"Bucket '{S3_BUCKET_NAME}' not found")
+            logger.error(f"Bucket '{S3_BUCKET_NAME}' not found")
             raise Exception(f"Bucket '{S3_BUCKET_NAME}' does not exist. Please create it in Backblaze B2 dashboard.")
         else:
             raise

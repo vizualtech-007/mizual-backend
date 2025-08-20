@@ -12,6 +12,7 @@ Categories: env, database, redis, storage, api
 """
 
 import os
+from src.logger import logger
 import sys
 import asyncio
 import psycopg2
@@ -25,18 +26,18 @@ from dotenv import load_dotenv
 load_dotenv()
 
 def print_header(title):
-    print(f"\n{'='*50}")
-    print(f"🔍 {title}")
-    print(f"{'='*50}")
+    logger.info(f"\n{'='*50}")
+    logger.info(f"🔍 {title}")
+    logger.info(f"{'='*50}")
 
 def print_success(message):
-    print(f"✅ {message}")
+    logger.info(f"✅ {message}")
 
 def print_error(message):
-    print(f"❌ {message}")
+    logger.info(f"❌ {message}")
 
 def print_info(message):
-    print(f"ℹ️  {message}")
+    logger.info(f"ℹ️  {message}")
 
 def test_environment_variables():
     """Test environment variables"""
@@ -325,7 +326,7 @@ async def run_all_tests():
         else:
             result = category['test']()
         results[category['name']] = result
-        print()  # Add spacing between tests
+        logger.info()  # Add spacing between tests
     
     print_header("SUMMARY")
     all_passed = True
@@ -345,20 +346,20 @@ async def run_all_tests():
 
 def show_usage():
     """Show usage instructions"""
-    print("Usage:")
-    print("  python debug_connections.py                    # Test all connections")
-    print("  python debug_connections.py <category>         # Test specific category")
-    print("  python debug_connections.py --help             # Show this help")
-    print()
-    print("Available categories:")
+    logger.info("Usage:")
+    logger.info("  python debug_connections.py                    # Test all connections")
+    logger.info("  python debug_connections.py <category>         # Test specific category")
+    logger.info("  python debug_connections.py --help             # Show this help")
+    logger.info()
+    logger.info("Available categories:")
     for key, category in CATEGORIES.items():
-        print(f"  {key:<10} - {category['name']}")
-    print()
-    print("Examples:")
-    print("  python debug_connections.py env               # Test only environment variables")
-    print("  python debug_connections.py database          # Test only database")
-    print("  python debug_connections.py storage           # Test only S3 storage")
-    print("  python debug_connections.py api               # Test only BFL API")
+        logger.info(f"  {key:<10} - {category['name']}")
+    logger.info()
+    logger.info("Examples:")
+    logger.info("  python debug_connections.py env               # Test only environment variables")
+    logger.info("  python debug_connections.py database          # Test only database")
+    logger.info("  python debug_connections.py storage           # Test only S3 storage")
+    logger.info("  python debug_connections.py api               # Test only BFL API")
 
 async def main():
     """Main function with category support"""

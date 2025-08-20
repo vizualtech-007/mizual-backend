@@ -3,6 +3,7 @@ from celery import Celery
 from . import crud, database, flux_api, s3, models
 from .flux_api import BFLServiceError
 from .task_stages import process_edit_with_stage_retries
+from .logger import logger
 import os
 
 # Get Redis URLs and modify them to work with Celery SSL requirements
@@ -12,7 +13,7 @@ backend_url = os.environ.get("CELERY_RESULT_BACKEND", "redis://redis:6379/0")
 # Add environment prefix for Redis keys
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 redis_prefix = f"{ENVIRONMENT}:"
-print(f"Initializing Celery with environment: {ENVIRONMENT}, redis_prefix: {redis_prefix}")
+logger.info(f"Initializing Celery with environment: {ENVIRONMENT}, redis_prefix: {redis_prefix}")
 
 # For rediss:// URLs, add the required SSL parameter that Celery expects
 if broker_url.startswith('rediss://'):
@@ -34,17 +35,17 @@ def process_image_edit(edit_id: int):
     Process image edit with stage-specific retries.
     Each stage can be retried independently without restarting the entire process.
     """
-    print(f"CELERY TASK STARTED: process_image_edit for edit_id={edit_id} (stage-specific retries)")
+    logger.info(f"CELERY TASK STARTED: process_image_edit for edit_id={edit_id} (stage-specific retries)")
     
     try:
         # Use the stage-specific retry system
         process_edit_with_stage_retries(edit_id)
-        print(f"TASK COMPLETED: Edit {edit_id} processed successfully")
+        logger.info(f"TASK COMPLETED: Edit {edit_id} processed successfully")
         
     except Exception as e:
-        print(f"TASK FAILED: Edit {edit_id} failed with error: {str(e)}")
-        print(f"ERROR TYPE: {type(e).__name__}")
-        print(f"ERROR DETAILS: {repr(e)}")
+        logger.error(f"TASK FAILED: Edit {edit_id} failed with error: {str(e)}")
+        logger.error(f"ERROR TYPE: {type(e).__name__}")
+        logger.error(f"ERROR DETAILS: {repr(e)}")
         
         # Don't use Celery's retry mechanism - we handle retries internally
         # Just mark as failed and exit
