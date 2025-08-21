@@ -1,29 +1,46 @@
 name: Deploy to Lightsail
 on:
   push:
-    branches: [main]  # main = production, other branches = preview
+    branches: [main, dev]  # main = production, dev = preview
 
 jobs:
-  deploy-production:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         
+      - name: Determine deployment environment
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "ENVIRONMENT=production" >> $GITHUB_OUTPUT
+            echo "TARGET_HOST=${{ secrets.LIGHTSAIL_PROD_HOST }}" >> $GITHUB_OUTPUT
+            echo "SSH_KEY=${{ secrets.LIGHTSAIL_PROD_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "ENV_FILE=.env.production" >> $GITHUB_OUTPUT
+          else
+            echo "ENVIRONMENT=preview" >> $GITHUB_OUTPUT
+            echo "TARGET_HOST=${{ secrets.LIGHTSAIL_DEV_HOST }}" >> $GITHUB_OUTPUT
+            echo "SSH_KEY=${{ secrets.LIGHTSAIL_DEV_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "ENV_FILE=.env.dev" >> $GITHUB_OUTPUT
+          fi
+
       - name: Deploy to Lightsail
         uses: appleboy/ssh-action@v0.1.5
         with:
-          host: ${{ secrets.LIGHTSAIL_HOST }}
+          host: ${{ steps.env.outputs.TARGET_HOST }}
           username: ubuntu
-          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          key: ${{ steps.env.outputs.SSH_KEY }}
           script: |
-            # Set production environment
-            DEPLOY_ENV="production"
-            echo "Deploying PRODUCTION environment (main branch)"
+            # Set environment based on branch
+            DEPLOY_ENV="${{ steps.env.outputs.ENVIRONMENT }}"
+            ENV_FILE="${{ steps.env.outputs.ENV_FILE }}"
+            echo "Deploying $DEPLOY_ENV environment (${{ github.ref_name }} branch)"
             
-            # Preserve production environment file
-            if [ -f /opt/mizual/.env.production ]; then
-              cp /opt/mizual/.env.production /tmp/.env.production.backup
+            # Preserve environment file
+            if [ -f /opt/mizual/$ENV_FILE ]; then
+              cp /opt/mizual/$ENV_FILE /tmp/$ENV_FILE.backup
+              echo "Backed up $ENV_FILE"
             fi
             
             # Clean setup
@@ -34,12 +51,12 @@ jobs:
             git clone https://github.com/vizualtech-007/mizual-backend.git .
             git checkout ${{ github.ref_name }}
             
-            # Restore production environment file
-            if [ -f /tmp/.env.production.backup ]; then
-              cp /tmp/.env.production.backup .env.production
-              echo "Restored .env.production"
+            # Restore environment file
+            if [ -f /tmp/$ENV_FILE.backup ]; then
+              cp /tmp/$ENV_FILE.backup $ENV_FILE
+              echo "Restored $ENV_FILE"
             else
-              echo "Warning: .env.production backup not found"
+              echo "Warning: $ENV_FILE backup not found"
             fi
             
             # Deploy with specified environment
@@ -49,10 +66,10 @@ jobs:
       - name: Health Check
         uses: appleboy/ssh-action@v0.1.5
         with:
-          host: ${{ secrets.LIGHTSAIL_HOST }}
+          host: ${{ steps.env.outputs.TARGET_HOST }}
           username: ubuntu
-          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          key: ${{ steps.env.outputs.SSH_KEY }}
           script: |
             sleep 30
             curl -f http://localhost:80/health || exit 1
-            echo "Production deployment successful!"
+            echo "${{ steps.env.outputs.ENVIRONMENT }} deployment successful!"
