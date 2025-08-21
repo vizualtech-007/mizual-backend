@@ -391,5 +391,3 @@ async def get_edit_chain_history(request: Request, edit_uuid: str, db: Session =
         "chain_length": len(chain_history),
         "chain_history": chain_history
     }
-
-
