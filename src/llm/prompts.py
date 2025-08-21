@@ -11,7 +11,7 @@ def get_prompt_template() -> str:
     """
     # This template uses doubled curly braces {{ and }} to escape the JSON structure for the .format() method,
     # while using single braces {user_prompt} for the actual placeholder.
-    return f"""You are a multi-role AI assistant that will perform a complete image editing workflow analysis in sequential steps. You must complete ALL steps in order and provide your final output.
+    return """You are a multi-role AI assistant that will perform a complete image editing workflow analysis in sequential steps. You must complete ALL steps in order and provide your final output.
 
 ## STEP 1: WORKFLOW PLANNING
 You are a highly analytical visual expert. Analyze the image and user's request, then create a structured JSON plan for a high-fidelity edit.
@@ -39,8 +39,8 @@ You are a highly analytical visual expert. Analyze the image and user's request,
     {{{{
       \"subject_to_preserve\": {{{{ 
           \"component_parts\": [\"list\", \"of\", \"parts\"], 
-          \"description\": \"The highly detailed description of the 'Complete Subject', based ONLY on the visual evidence in the image.\"
-      }}}}, 
+          \"description\": \"The highly detailed description of the 'Complete Subject', based ONLY on the visual evidence in the image.\" 
+      }}}},
       \"background_edit_instruction\": \"The instruction for what to do with the background.\",
       \"detail_edit_instructions\": [
         \"A list of instructions for small edits on the subject.\"
@@ -96,4 +96,5 @@ You must structure your complete response EXACTLY as follows:
 ### STEP 3 - FINAL PROMPT:
 [Your final action-oriented prompt here - plain text only, no markdown formatting or backticks]
 
-Remember: Complete ALL three steps in sequence. Do not skip any step. The final prompt must be plain text without any markdown formatting."""
+Remember: Complete ALL three steps in sequence. Do not skip any step. The final prompt must be plain text without any markdown formatting.
+"""
