@@ -3,36 +3,47 @@ Gemini LLM Provider Implementation
 """
 
 import os
+from io import BytesIO
 import google.generativeai as genai
-from .base import LLMProvider
+from .base import BaseLLMProvider
 from ..logger import logger
 
-class GeminiProvider(LLMProvider):
+class GeminiProvider(BaseLLMProvider):
     """Google Gemini implementation of LLM Provider"""
     
-    def __init__(self, api_key=None):
+    def __init__(self):
         """Initialize Gemini provider with API key and model"""
         super().__init__()
-        self.api_key = api_key or os.environ.get("LLM_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        if not self.api_key:
-            logger.error("Error: Gemini API key not found in environment variables")
+        self.provider_name = "gemini"
+        
+        # Get Gemini-specific configuration
+        api_key = os.environ.get("LLM_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            logger.info("Error: Gemini API key not found in environment variables")
             raise ValueError("Gemini API key not found. Set LLM_API_KEY or GOOGLE_API_KEY")
         
         self.model_name = os.environ.get("LLM_MODEL", "gemini-1.5-flash")
         logger.info(f"Using Gemini model: {self.model_name}")
         
-        genai.configure(api_key=self.api_key)
+        genai.configure(api_key=api_key)
         
         try:
             self.model = genai.GenerativeModel(self.model_name)
             logger.info(f"Successfully initialized Gemini model: {self.model_name}")
         except Exception as e:
-            logger.error(f"Error initializing Gemini model: {str(e)}")
+            logger.info(f"Error initializing Gemini model: {str(e)}")
             raise
     
     def enhance_prompt(self, prompt, image_data):
         """
         Enhance a user prompt using Gemini and the image context
+        
+        Args:
+            prompt (str): The original user prompt
+            image_data (bytes): The image data as bytes
+            
+        Returns:
+            str: The enhanced prompt
         """
         logger.info(f"Enhancing prompt with Gemini: '{prompt}'")
         
@@ -64,7 +75,7 @@ You are a highly analytical visual expert. Analyze the image and user's request,
 
 **4. Create JSON Output:**
     Create your complete plan in a single, valid JSON object with this structure:
-    {{{{
+    {{
       "subject_to_preserve": {{{{ 
           "component_parts": ["list", "of", "parts"], 
           "description": "The highly detailed description of the 'Complete Subject', based ONLY on the visual evidence in the image."
@@ -73,11 +84,11 @@ You are a highly analytical visual expert. Analyze the image and user's request,
       "detail_edit_instructions": [
         "A list of instructions for small edits on the subject."
       ]
-    }}}} 
+    }} 
 
 ## STEP 2: PLAN VALIDATION
 Now switch roles. You are a quality assurance expert with a keen eye. Review the JSON plan you just created and compare the `description` inside the `subject_to_preserve` key against the image.
-Does the description accurately match the main subject in the image, including its parts and their proportions?
+Does the description accurately match the main main subject in the image, including its parts and their proportions?
 Provide a validation result: YES or NO.
 
 ## STEP 3: PROMPT ARCHITECTURE
@@ -124,12 +135,11 @@ You must structure your complete response EXACTLY as follows:
 ### STEP 3 - FINAL PROMPT:
 [Your final action-oriented prompt here - plain text only, no markdown formatting or backticks]
 
-Remember: Complete ALL three steps in sequence. Do not skip any step. The final prompt must be plain text without any markdown formatting."""
+Remember: Complete ALL three steps in sequence. Do not skip any step. The final prompt must be plain text without any markdown formatting.""" 
             
-            mime_type = self._get_image_format(img_bytes)
             prompt_parts = [
                 system_prompt,
-                {"mime_type": f"image/{mime_type}" if mime_type != 'unknown' else "image/jpeg", "data": img_bytes}
+                {"mime_type": "image/jpeg", "data": img_bytes}
             ]
             generation_config = {{
                 "temperature": 0.1,
@@ -143,27 +153,43 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
             )
             
             response_text = response.text
+            
             lines = response_text.split('\n')
+            
             final_prompt = None
+            in_prompt_section = False
+            in_code_block = False
             
             for i, line in enumerate(lines):
                 if 'STEP 3 - FINAL PROMPT:' in line or 'FINAL PROMPT:' in line:
+                    in_prompt_section = True
                     prompt_lines = []
                     for j in range(i + 1, len(lines)):
                         current_line = lines[j].strip()
-                        if current_line and not current_line.startswith('#') and not current_line.startswith('```'):
+
+                        if current_line == '```':
+                            in_code_block = not in_code_block
+                            continue
+
+                        if not current_line or current_line.startswith('#'):
+                            continue
+
+                        if current_line and not current_line.startswith('```'):
                             prompt_lines.append(current_line)
+
                     if prompt_lines:
                         final_prompt = '\n'.join(prompt_lines)
                         break
             
             if final_prompt:
-                logger.info(f"Gemini enhancement completed. Enhanced prompt: '{final_prompt}'")
+                logger.info(f"Gemini enhancement completed")
+                logger.info(f"Original prompt: '{prompt}'")
+                logger.info(f"Enhanced prompt: '{final_prompt}'")
                 return final_prompt
             else:
-                logger.info(f"Could not extract final prompt from Gemini response. Falling back.")
-                return prompt
+                logger.info(f"Could not extract final prompt from Gemini response")
+                return None
             
         except Exception as e:
-            logger.error(f"Gemini enhancement failed: {str(e)}")
-            return prompt
+            logger.info(f"Gemini enhancement failed: {str(e)}")
+            return None
