@@ -49,28 +49,28 @@ async def edit_image_with_flux(image: bytes, prompt: str) -> bytes:
                 response.raise_for_status()
             except httpx.HTTPStatusError as e:
                 if e.response.status_code >= 500:
-                raise BFLServiceError(
-                    f"BFL service is currently unavailable (HTTP {e.response.status_code}). Please try again later.",
-                    status_code=e.response.status_code,
-                    is_temporary=True
-                )
+                    raise BFLServiceError(
+                        f"BFL service is currently unavailable (HTTP {e.response.status_code}). Please try again later.",
+                        status_code=e.response.status_code,
+                        is_temporary=True
+                    )
                 elif e.response.status_code == 429:
+                    raise BFLServiceError(
+                        "BFL service is rate limiting requests. Please try again in a few minutes.",
+                        status_code=e.response.status_code,
+                        is_temporary=True
+                    )
+                else:
+                    raise BFLServiceError(
+                        f"BFL service error (HTTP {e.response.status_code}): {e.response.text}",
+                        status_code=e.response.status_code,
+                        is_temporary=False
+                    )
+            except httpx.RequestError as e:
                 raise BFLServiceError(
-                    "BFL service is rate limiting requests. Please try again in a few minutes.",
-                    status_code=e.response.status_code,
+                    f"Failed to connect to BFL service: {str(e)}",
                     is_temporary=True
                 )
-                else:
-                raise BFLServiceError(
-                    f"BFL service error (HTTP {e.response.status_code}): {e.response.text}",
-                    status_code=e.response.status_code,
-                    is_temporary=False
-                )
-            except httpx.RequestError as e:
-            raise BFLServiceError(
-                f"Failed to connect to BFL service: {str(e)}",
-                is_temporary=True
-            )
 
             edit_response = response.json()
             request_id = edit_response.get("id")
