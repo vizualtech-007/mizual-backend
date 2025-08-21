@@ -5,7 +5,24 @@ Each stage can be retried independently without restarting the entire process.
 
 import asyncio
 import httpx
-from . import flux_api, s3
+from . import flux_api, s3, cache
+import gc  # Garbage collection for memory optimization
+
+# Shared HTTP client with connection pooling
+_http_client = None
+
+def get_http_client():
+    """Get or create shared HTTP client with connection pooling"""
+    global _http_client
+    if _http_client is None:
+        timeout_config = httpx.Timeout(10.0, connect=3.0)
+        limits = httpx.Limits(max_keepalive_connections=3, max_connections=6)
+        _http_client = httpx.Client(
+            timeout=timeout_config,
+            limits=limits,
+            http2=True  # Enable HTTP/2 for better performance
+        )
+    return _http_client
 from .flux_api import BFLServiceError
 from .performance_tracker import get_performance_tracker, finish_performance_tracking
 import os
@@ -37,6 +54,12 @@ class StageProcessor:
     def update_stage(self, stage: str):
         """Update processing stage in database using raw psycopg"""
         db_raw.update_edit_processing_stage(self.edit_id, stage)
+        
+        # Invalidate status cache when stage changes
+        edit = self.get_edit()
+        if edit:
+            cache.invalidate_edit_status(edit['uuid'])
+        
         logger.info(f"STAGE UPDATED: {stage} for edit {self.edit_id}")
     
     def stage_enhance_prompt(self):
@@ -55,14 +78,12 @@ class StageProcessor:
                 logger.info("Attempting prompt enhancement with LLM")
                 llm_provider = get_provider()
                 if llm_provider:
-                    # Fetch image for prompt enhancement - Optimized
+                    # Fetch image for prompt enhancement - Optimized with connection pooling
                     logger.info(f"Fetching image for prompt enhancement from: {edit['original_image_url']}")
-                    import httpx
-                    timeout = httpx.Timeout(10.0, connect=3.0)  # Even faster timeouts
-                    with httpx.Client(timeout=timeout) as client:
-                        response = client.get(edit['original_image_url'])
-                        response.raise_for_status()
-                        image_bytes = response.content
+                    client = get_http_client()
+                    response = client.get(edit['original_image_url'])
+                    response.raise_for_status()
+                    image_bytes = response.content
                     
                     enhanced_prompt = llm_provider.enhance_prompt(original_prompt, image_bytes)
                     logger.info("Gemini enhancement completed")
@@ -76,6 +97,9 @@ class StageProcessor:
                     # Store image_bytes for reuse to avoid second S3 download
                     self.cached_image_bytes = image_bytes
                     logger.info(f"Cached image bytes for reuse (size: {len(image_bytes)} bytes)")
+                    
+                    # Force garbage collection to free memory from image processing
+                    gc.collect()
                     
             except Exception as e:
                 logger.info(f"LLM enhancement failed: {e}")
@@ -104,14 +128,17 @@ class StageProcessor:
         image_url = edit['original_image_url']
         logger.info(f"Fetching image from: {image_url}")
         
-        # Optimized HTTP request with faster timeout
-        timeout = httpx.Timeout(10.0, connect=3.0)  # Even faster timeouts
-        with httpx.Client(timeout=timeout) as client:
-            response = client.get(image_url)
-            response.raise_for_status()
-            image_bytes = response.content
+        # Optimized HTTP request with connection pooling
+        client = get_http_client()
+        response = client.get(image_url)
+        response.raise_for_status()
+        image_bytes = response.content
             
         logger.info(f"Successfully fetched original image, size: {len(image_bytes)} bytes")
+        
+        # Cache the image for reuse in later stages
+        self.cached_image_bytes = image_bytes
+        
         return image_bytes
     
     def stage_process_with_ai(self, image_bytes: bytes, prompt: str):
@@ -125,6 +152,13 @@ class StageProcessor:
         try:
             edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, prompt))
             logger.info(f"BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
+            
+            # Free original image from memory after processing
+            if hasattr(self, 'cached_image_bytes'):
+                self.cached_image_bytes = None
+            del image_bytes
+            gc.collect()  # Force garbage collection
+            
             return edited_image_bytes
         except Exception as e:
             logger.info(f"BFL API ERROR: {str(e)} - NO RETRIES")
@@ -142,12 +176,22 @@ class StageProcessor:
         edited_image_url = s3.upload_file_to_s3(edited_image_bytes, edited_file_name)
         logger.info(f"Uploaded edited image to: {edited_image_url}")
         
+        # Free edited image from memory after upload
+        del edited_image_bytes
+        gc.collect()  # Force garbage collection
+        
         return edited_image_url
     
     def stage_complete(self, edited_image_url: str):
         """Stage: Mark as completed using raw psycopg"""
         logger.info(f"STAGE: Completing edit {self.edit_id}")
         db_raw.update_edit_with_result(self.edit_id, "completed", edited_image_url)
+        
+        # Invalidate caches when edit is completed
+        edit = self.get_edit()
+        if edit:
+            cache.invalidate_edit_status(edit['uuid'])
+        
         logger.info(f"TASK COMPLETED: Edit {self.edit_id} completed successfully")
 
 
@@ -215,6 +259,10 @@ def process_edit_with_stage_retries(edit_id: int):
         # Initialize processing - Update status immediately
         tracker.start_stage("initialization")
         db_raw.update_edit_status(edit_id, "processing")
+        
+        # Invalidate status cache when processing starts
+        cache.invalidate_edit_status(edit['uuid'])
+        
         tracker.end_stage("initialization")
         
         # Stage 0: Enhance prompt (moved from API for instant response)
@@ -271,6 +319,15 @@ def process_edit_with_stage_retries(edit_id: int):
         try:
             db_raw.update_edit_status(edit_id, "failed")
             db_raw.update_edit_processing_stage(edit_id, "failed")
+            
+            # Invalidate status cache when failed
+            try:
+                edit_for_cache = db_raw.get_edit_by_id(edit_id)
+                if edit_for_cache:
+                    cache.invalidate_edit_status(edit_for_cache['uuid'])
+            except Exception:
+                pass  # Don't fail on cache invalidation
+            
             logger.info(f"STATUS UPDATED: Edit {edit_id} marked as failed")
         except Exception as update_error:
             logger.info(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")

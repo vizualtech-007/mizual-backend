@@ -3,6 +3,22 @@ import os
 import base64
 import asyncio
 
+# Shared HTTP client with connection pooling
+_http_client = None
+
+def get_http_client():
+    """Get or create shared HTTP client with connection pooling"""
+    global _http_client
+    if _http_client is None:
+        timeout_config = httpx.Timeout(30.0, connect=10.0)
+        limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        _http_client = httpx.AsyncClient(
+            timeout=timeout_config,
+            limits=limits,
+            http2=True  # Enable HTTP/2 for better performance
+        )
+    return _http_client
+
 FLUX_API_URL = os.environ.get("FLUX_API_URL", "https://api.bfl.ai/v1/flux-kontext-pro")
 BFL_API_KEY = os.environ.get("BFL_API_KEY")
 
@@ -34,10 +50,8 @@ async def edit_image_with_flux(image: bytes, prompt: str) -> bytes:
         "safety_tolerance": 2,  # Less restrictive moderation (0=strictest, 2=balanced)
     }
 
-    timeout_config = httpx.Timeout(30.0, connect=10.0)
-    
     try:
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
+        client = get_http_client()
             # Submit the edit request
             try:
                 response = await client.post(FLUX_API_URL, headers=headers, json=data)

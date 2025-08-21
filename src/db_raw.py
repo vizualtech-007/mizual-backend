@@ -22,7 +22,12 @@ def get_connection():
     conn = psycopg.connect(
         DATABASE_URL,
         autocommit=True,  # No transactions, no prepared statements
-        options=f"-csearch_path={DATABASE_SCHEMA},public"
+        options=f"-csearch_path={DATABASE_SCHEMA},public",
+        # Optimize connection settings for performance
+        connect_timeout=10,
+        keepalives_idle=600,  # Keep connection alive
+        keepalives_interval=30,
+        keepalives_count=3
     )
     # Force simple query protocol
     conn.execute(f"SET search_path TO {DATABASE_SCHEMA}, public")
@@ -81,21 +86,48 @@ def get_edit_by_uuid(edit_uuid: str) -> Optional[Dict[str, Any]]:
             }
 
 def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = None, parent_edit_uuid: str = None) -> Dict[str, Any]:
-    """Create new edit - single database call with optional chain creation"""
+    """Create new edit - optimized single transaction with optional chain creation"""
     edit_uuid = str(uuid.uuid4())
     
     with get_connection() as conn:
         with conn.cursor() as cur:
-            # Insert edit with created_at
-            cur.execute("""
-                INSERT INTO edits (uuid, prompt, enhanced_prompt, original_image_url, status, processing_stage, created_at)
-                VALUES (%s, %s, %s, %s, 'pending', 'pending', NOW())
-                RETURNING id, uuid, prompt, enhanced_prompt, original_image_url, 
-                         edited_image_url, status, processing_stage, created_at
-            """, (edit_uuid, prompt, enhanced_prompt, original_image_url))
+            # Use a single transaction for both edit creation and chain insertion
+            if parent_edit_uuid:
+                # Optimized query: create edit and chain in single transaction
+                cur.execute("""
+                    WITH new_edit AS (
+                        INSERT INTO edits (uuid, prompt, enhanced_prompt, original_image_url, status, processing_stage, created_at)
+                        VALUES (%s, %s, %s, %s, 'pending', 'pending', NOW())
+                        RETURNING id, uuid, prompt, enhanced_prompt, original_image_url, 
+                                 edited_image_url, status, processing_stage, created_at
+                    ),
+                    chain_position AS (
+                        SELECT COALESCE(MAX(chain_position), 0) + 1 as pos
+                        FROM edit_chains ec
+                        JOIN edits e ON ec.edit_uuid = e.uuid
+                        WHERE e.uuid = %s OR ec.parent_edit_uuid = %s
+                    )
+                    INSERT INTO edit_chains (edit_uuid, parent_edit_uuid, chain_position)
+                    SELECT %s, %s, pos FROM chain_position;
+                    
+                    SELECT id, uuid, prompt, enhanced_prompt, original_image_url, 
+                           edited_image_url, status, processing_stage, created_at
+                    FROM edits WHERE uuid = %s
+                """, (edit_uuid, prompt, enhanced_prompt, original_image_url, 
+                      parent_edit_uuid, parent_edit_uuid, 
+                      edit_uuid, parent_edit_uuid, 
+                      edit_uuid))
+            else:
+                # Simple edit creation without chain
+                cur.execute("""
+                    INSERT INTO edits (uuid, prompt, enhanced_prompt, original_image_url, status, processing_stage, created_at)
+                    VALUES (%s, %s, %s, %s, 'pending', 'pending', NOW())
+                    RETURNING id, uuid, prompt, enhanced_prompt, original_image_url, 
+                             edited_image_url, status, processing_stage, created_at
+                """, (edit_uuid, prompt, enhanced_prompt, original_image_url))
             
             row = cur.fetchone()
-            edit_data = {
+            return {
                 'id': row[0],
                 'uuid': row[1],
                 'prompt': row[2],
@@ -106,26 +138,6 @@ def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = Non
                 'processing_stage': row[7],
                 'created_at': row[8]
             }
-            
-            # Create chain relationship if parent exists
-            if parent_edit_uuid:
-                # Get parent chain position
-                cur.execute("""
-                    SELECT COALESCE(MAX(chain_position), 0) + 1
-                    FROM edit_chains ec
-                    JOIN edits e ON ec.edit_uuid = e.uuid
-                    WHERE e.uuid = %s OR ec.parent_edit_uuid = %s
-                """, (parent_edit_uuid, parent_edit_uuid))
-                
-                chain_position = cur.fetchone()[0]
-                
-                # Insert chain relationship
-                cur.execute("""
-                    INSERT INTO edit_chains (edit_uuid, parent_edit_uuid, chain_position)
-                    VALUES (%s, %s, %s)
-                """, (edit_uuid, parent_edit_uuid, chain_position))
-            
-            return edit_data
 
 def update_edit_status(edit_id: int, status: str) -> bool:
     """Update edit status - single database call"""
@@ -253,6 +265,64 @@ def get_edit_feedback(edit_uuid: str) -> Optional[Dict[str, Any]]:
                 'feedback_text': row[2],
                 'user_ip': row[3],
                 'created_at': row[4]
+            }
+
+def get_database_performance_info() -> Dict[str, Any]:
+    """Get database performance information and optimization suggestions"""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            # Check if optimal indexes exist
+            cur.execute("""
+                SELECT 
+                    schemaname, tablename, indexname, indexdef
+                FROM pg_indexes 
+                WHERE schemaname = %s 
+                AND tablename IN ('edits', 'edit_chains', 'edit_feedback')
+                ORDER BY tablename, indexname
+            """, (DATABASE_SCHEMA,))
+            
+            indexes = cur.fetchall()
+            
+            # Check query performance statistics if available
+            cur.execute("""
+                SELECT 
+                    query, calls, total_time, mean_time
+                FROM pg_stat_statements 
+                WHERE query LIKE '%edits%' 
+                ORDER BY total_time DESC 
+                LIMIT 5
+            """)
+            
+            try:
+                query_stats = cur.fetchall()
+            except:
+                query_stats = []  # pg_stat_statements might not be enabled
+            
+            return {
+                "indexes": [
+                    {
+                        "schema": row[0],
+                        "table": row[1], 
+                        "index_name": row[2],
+                        "definition": row[3]
+                    } for row in indexes
+                ],
+                "query_stats": [
+                    {
+                        "query": row[0][:100] + "..." if len(row[0]) > 100 else row[0],
+                        "calls": row[1],
+                        "total_time": row[2],
+                        "mean_time": row[3]
+                    } for row in query_stats
+                ],
+                "optimization_suggestions": [
+                    "Ensure index on edits(uuid) for fast lookups",
+                    "Ensure index on edits(status, processing_stage) for status queries",
+                    "Ensure index on edit_chains(edit_uuid) for chain lookups", 
+                    "Ensure index on edit_chains(parent_edit_uuid) for parent lookups",
+                    "Ensure index on edit_feedback(edit_uuid) for feedback lookups",
+                    "Consider partial index on edits(created_at) WHERE status='completed'"
+                ]
             }
 
 logger.info("Raw psycopg database module initialized with prepare_threshold=0")

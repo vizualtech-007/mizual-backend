@@ -40,17 +40,40 @@ celery = Celery(
     broker_transport_options=broker_transport_options
 )
 
-# Configure Celery for 3 concurrent workers
+# Configure Celery for 3 concurrent workers with optimized serialization
 celery.conf.update(
     worker_concurrency=CELERY_CONCURRENCY,  # Use environment variable
     worker_prefetch_multiplier=1,           # Process one task at a time per worker
     task_acks_late=True,                   # Better error handling
     worker_max_tasks_per_child=100,        # Recycle worker after 100 tasks to prevent memory leaks
+    
+    # Optimized serialization for better performance
+    task_serializer='json',                # JSON is faster than pickle
+    result_serializer='json',              # JSON results
+    accept_content=['json'],               # Only accept JSON
+    result_expires=3600,                   # Results expire after 1 hour
+    
+    # Performance optimizations
+    task_compression='gzip',               # Compress task data
+    result_compression='gzip',             # Compress results
+    task_ignore_result=False,              # We need results for polling
+    
+    # Connection optimization
+    broker_connection_retry_on_startup=True,
+    broker_connection_retry=True,
+    broker_connection_max_retries=10,
 )
 
 logger.info(f"Celery configured with concurrency: {CELERY_CONCURRENCY}, prefetch: 1, max_tasks_per_child: 100")
 
-@celery.task(name='src.tasks.process_image_edit', soft_time_limit=600, time_limit=660)
+@celery.task(
+    name='src.tasks.process_image_edit', 
+    soft_time_limit=600, 
+    time_limit=660,
+    serializer='json',
+    compression='gzip',
+    acks_late=True
+)
 def process_image_edit(edit_id: int):
     """
     Process image edit with stage-specific retries.
