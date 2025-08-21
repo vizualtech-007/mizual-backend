@@ -18,10 +18,10 @@ if [ $? -ne 0 ]; then
 fi
 echo "Database migrations completed successfully"
 
-# Start Celery worker in background (optimized for 2GB RAM, 2 vCPU)
+# Start Celery worker in background (unified configuration for 2GB RAM, 2 vCPU)
 echo "Starting Celery worker for environment: $ENVIRONMENT"
-echo "Using memory-optimized Celery configuration for Lightsail 2GB/2vCPU"
-celery -A src.tasks.celery worker --loglevel=warning --concurrency=1 -E --prefetch-multiplier=1 --max-tasks-per-child=100 &
+echo "Using unified Celery configuration for Lightsail 2GB/2vCPU"
+celery -A src.tasks.celery worker --loglevel=warning --concurrency=2 -E --prefetch-multiplier=1 --max-tasks-per-child=100 &
 
 # Give Celery a moment to start and show any errors
 echo "Waiting for Celery worker to initialize..."
@@ -34,7 +34,7 @@ else
     echo "WARNING: Celery worker may not have started properly"
 fi
 
-# Start FastAPI server (optimized for 2GB RAM, 2 vCPU)
+# Start FastAPI server (unified configuration for 2GB RAM, 2 vCPU)
 echo "Starting FastAPI server on port ${PORT:-8000}..."
-echo "Using 2 gunicorn workers for Lightsail 2GB/2vCPU"
-gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${PORT:-8000}
+echo "Using 5 gunicorn workers for Lightsail 2GB/2vCPU"
+gunicorn -w 5 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:${PORT:-8000}

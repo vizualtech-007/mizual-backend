@@ -16,19 +16,13 @@ jobs:
           if [ "${{ github.ref_name }}" = "main" ]; then
             echo "ENVIRONMENT=production" >> $GITHUB_OUTPUT
             echo "TARGET_HOST=${{ secrets.LIGHTSAIL_PROD_HOST }}" >> $GITHUB_OUTPUT
+            echo "SSH_KEY=${{ secrets.LIGHTSAIL_PROD_SSH_KEY }}" >> $GITHUB_OUTPUT
             echo "ENV_FILE=.env.production" >> $GITHUB_OUTPUT
           else
             echo "ENVIRONMENT=preview" >> $GITHUB_OUTPUT
             echo "TARGET_HOST=${{ secrets.LIGHTSAIL_DEV_HOST }}" >> $GITHUB_OUTPUT
+            echo "SSH_KEY=${{ secrets.LIGHTSAIL_DEV_SSH_KEY }}" >> $GITHUB_OUTPUT
             echo "ENV_FILE=.env.dev" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Create .env file from secret
-        run: |
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "${{ secrets.ENV_FILE_PROD }}" > .env
-          else
-            echo "${{ secrets.ENV_FILE_DEV }}" > .env
           fi
 
       - name: Deploy to Lightsail
@@ -36,28 +30,17 @@ jobs:
         with:
           host: ${{ steps.env.outputs.TARGET_HOST }}
           username: ubuntu
-          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
+          key: ${{ steps.env.outputs.SSH_KEY }}
           script: |
             # Set environment based on branch
-            if [ "${{ github.ref_name }}" = "main" ]; then
-              export DEPLOY_ENV="production"
-            else
-              export DEPLOY_ENV="dev"
-            fi
-            
+            DEPLOY_ENV="${{ steps.env.outputs.ENVIRONMENT }}"
+            ENV_FILE="${{ steps.env.outputs.ENV_FILE }}"
             echo "Deploying $DEPLOY_ENV environment (${{ github.ref_name }} branch)"
             
-            # Stop existing containers before cleanup
-            if [ -d /opt/mizual ]; then
-              echo "Stopping existing containers..."
-              cd /opt/mizual
-              if command -v docker-compose &> /dev/null; then
-                docker-compose -f docker-compose.prod.yml down || true
-              else
-                docker compose -f docker-compose.prod.yml down || true
-              fi
-              docker system prune -f || true
-              echo "Containers stopped and cleaned"
+            # Preserve environment file
+            if [ -f /opt/mizual/$ENV_FILE ]; then
+              cp /opt/mizual/$ENV_FILE /tmp/$ENV_FILE.backup
+              echo "Backed up $ENV_FILE"
             fi
             
             # Clean setup
@@ -67,52 +50,25 @@ jobs:
             cd /opt/mizual
             git clone https://github.com/vizualtech-007/mizual-backend.git .
             git checkout ${{ github.ref_name }}
-      
-      - name: Copy .env file to server
-        uses: appleboy/scp-action@v0.1.5
-        with:
-          host: ${{ steps.env.outputs.TARGET_HOST }}
-          username: ubuntu
-          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
-          source: ".env"
-          target: "/opt/mizual/"
-
-      - name: Start services
-        uses: appleboy/ssh-action@v0.1.5
-        with:
-          host: ${{ steps.env.outputs.TARGET_HOST }}
-          username: ubuntu
-          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
-          script: |
-            cd /opt/mizual
             
-            # Verify .env file exists
-            if [ ! -f .env ]; then
-              echo "Error: .env file not found!"
-              exit 1
-            fi
-            
-            echo "Starting deployment with Docker Compose..."
-            
-            # Check which docker compose command is available
-            if command -v docker-compose &> /dev/null; then
-                echo "Using docker-compose (legacy)"
-                docker-compose -f docker-compose.prod.yml pull
-                docker-compose -f docker-compose.prod.yml up -d --build
+            # Restore environment file
+            if [ -f /tmp/$ENV_FILE.backup ]; then
+              cp /tmp/$ENV_FILE.backup $ENV_FILE
+              echo "Restored $ENV_FILE"
             else
-                echo "Using docker compose (modern)"
-                docker compose -f docker-compose.prod.yml pull
-                docker compose -f docker-compose.prod.yml up -d --build
+              echo "Warning: $ENV_FILE backup not found"
             fi
             
-            echo "Deployment completed"
+            # Deploy with specified environment
+            DEPLOY_ENV=$DEPLOY_ENV docker compose -f docker-compose.prod.yml pull
+            DEPLOY_ENV=$DEPLOY_ENV docker compose -f docker-compose.prod.yml up -d --build
             
       - name: Health Check
         uses: appleboy/ssh-action@v0.1.5
         with:
           host: ${{ steps.env.outputs.TARGET_HOST }}
           username: ubuntu
-          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
+          key: ${{ steps.env.outputs.SSH_KEY }}
           script: |
             sleep 30
             curl -f http://localhost:80/health || exit 1
