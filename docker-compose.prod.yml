@@ -39,6 +39,7 @@ services:
       - "80:8000"
     environment:
       - TZ=Asia/Kolkata
+      - PGPREPARE_THRESHOLD=0
     env_file:
       - .env
     networks:
@@ -67,6 +68,7 @@ services:
         condition: service_healthy
     environment:
       - TZ=Asia/Kolkata
+      - PGPREPARE_THRESHOLD=0
     env_file:
       - .env
     command: celery -A src.tasks.celery worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=100
