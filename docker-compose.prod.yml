@@ -39,12 +39,11 @@ services:
       - "80:8000"
     environment:
       - TZ=Asia/Kolkata
-      - PGPREPARE_THRESHOLD=0
     env_file:
       - .env.${DEPLOY_ENV:-production}
     networks:
       - mizual-network
-    command: gunicorn -w 5 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000
+    command: gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -54,7 +53,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 600M
+          memory: 400M
         reservations:
           memory: 400M
 
@@ -68,10 +67,9 @@ services:
         condition: service_healthy
     environment:
       - TZ=Asia/Kolkata
-      - PGPREPARE_THRESHOLD=0
     env_file:
       - .env.${DEPLOY_ENV:-production}
-    command: celery -A src.tasks.celery worker --loglevel=info --concurrency=2 --prefetch-multiplier=1 --max-tasks-per-child=100
+    command: celery -A src.tasks.celery worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=100
     networks:
       - mizual-network
     healthcheck:
@@ -83,7 +81,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 600M
         reservations:
           memory: 600M
 

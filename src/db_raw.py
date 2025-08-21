@@ -13,12 +13,16 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 DATABASE_SCHEMA = os.environ.get("DATABASE_SCHEMA", "public")
 
 def get_connection():
-    """Get a raw psycopg connection with prepare_threshold=0 to avoid prepared statements"""
-    return psycopg.connect(
+    """Get a raw psycopg connection that never uses prepared statements"""
+    # Nuclear option: Force autocommit mode and simple query protocol
+    conn = psycopg.connect(
         DATABASE_URL,
-        prepare_threshold=0,  # Never use prepared statements
+        autocommit=True,  # No transactions, no prepared statements
         options=f"-csearch_path={DATABASE_SCHEMA},public"
     )
+    # Force simple query protocol
+    conn.execute(f"SET search_path TO {DATABASE_SCHEMA}, public")
+    return conn
 
 def get_edit_by_id(edit_id: int) -> Optional[Dict[str, Any]]:
     """Get edit by ID - single database call"""
@@ -117,7 +121,6 @@ def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = Non
                     VALUES (%s, %s, %s)
                 """, (edit_uuid, parent_edit_uuid, chain_position))
             
-            conn.commit()
             return edit_data
 
 def update_edit_status(edit_id: int, status: str) -> bool:
@@ -128,7 +131,6 @@ def update_edit_status(edit_id: int, status: str) -> bool:
                 UPDATE edits SET status = %s WHERE id = %s
             """, (status, edit_id))
             
-            conn.commit()
             return cur.rowcount > 0
 
 def update_edit_processing_stage(edit_id: int, processing_stage: str) -> bool:
@@ -139,7 +141,6 @@ def update_edit_processing_stage(edit_id: int, processing_stage: str) -> bool:
                 UPDATE edits SET processing_stage = %s WHERE id = %s
             """, (processing_stage, edit_id))
             
-            conn.commit()
             return cur.rowcount > 0
 
 def update_edit_enhanced_prompt(edit_id: int, enhanced_prompt: str) -> bool:
@@ -150,7 +151,6 @@ def update_edit_enhanced_prompt(edit_id: int, enhanced_prompt: str) -> bool:
                 UPDATE edits SET enhanced_prompt = %s WHERE id = %s
             """, (enhanced_prompt, edit_id))
             
-            conn.commit()
             return cur.rowcount > 0
 
 def update_edit_with_result(edit_id: int, status: str, edited_image_url: str) -> bool:
@@ -163,7 +163,6 @@ def update_edit_with_result(edit_id: int, status: str, edited_image_url: str) ->
                 WHERE id = %s
             """, (status, edited_image_url, edit_id))
             
-            conn.commit()
             return cur.rowcount > 0
 
 def get_edit_chain_history(edit_uuid: str) -> List[Dict[str, Any]]:
@@ -226,7 +225,6 @@ def create_edit_feedback(edit_uuid: str, rating: int, feedback_text: str = None,
                     VALUES (%s, %s, %s, %s)
                 """, (edit_uuid, rating, feedback_text, user_ip))
                 
-                conn.commit()
                 return True
             except psycopg.IntegrityError:
                 # Feedback already exists for this edit
