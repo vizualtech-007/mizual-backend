@@ -20,7 +20,7 @@ services:
     environment:
       - TZ=Asia/Kolkata
     env_file:
-      - .env.${DEPLOY_ENV:-production}
+      - .env.dev
     command: python migrate.py
     networks:
       - mizual-network
@@ -40,7 +40,7 @@ services:
     environment:
       - TZ=Asia/Kolkata
     env_file:
-      - .env.${DEPLOY_ENV:-production}
+      - .env.dev
     networks:
       - mizual-network
     command: gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000
@@ -68,7 +68,7 @@ services:
     environment:
       - TZ=Asia/Kolkata
     env_file:
-      - .env.${DEPLOY_ENV:-production}
+      - .env.dev
     command: celery -A src.tasks.celery worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=100
     networks:
       - mizual-network

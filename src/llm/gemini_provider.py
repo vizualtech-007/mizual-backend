@@ -4,9 +4,9 @@ import os
 
 class GeminiProvider(LLMProvider):
     def __init__(self, api_key=None):
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("LLM_API_KEY")
         if not self.api_key:
-            raise ValueError("GEMINI_API_KEY not provided or set in environment")
+            raise ValueError("GEMINI_API_KEY or LLM_API_KEY not provided or set in environment")
         
         # Configuration for the generative model
         self.generation_config = {
