@@ -17,9 +17,10 @@ redis_prefix = f"{ENVIRONMENT}:"
 # Unified memory configuration for 2GB RAM, 2 vCPU Lightsail instances
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "5"))
 CELERY_MEMORY_LIMIT = os.environ.get("CELERY_WORKER_MEMORY_LIMIT", "1GB")
+CELERY_CONCURRENCY = int(os.environ.get("CELERY_CONCURRENCY", "1"))
 
 logger.info(f"Initializing Celery with environment: {ENVIRONMENT}, redis_prefix: {redis_prefix}")
-logger.info(f"Unified resource configuration - MAX_WORKERS: {MAX_WORKERS}, MEMORY_LIMIT: {CELERY_MEMORY_LIMIT}")
+logger.info(f"Unified resource configuration - MAX_WORKERS: {MAX_WORKERS}, MEMORY_LIMIT: {CELERY_MEMORY_LIMIT}, CONCURRENCY: {CELERY_CONCURRENCY}")
 
 # For rediss:// URLs, add the required SSL parameter that Celery expects
 if broker_url.startswith('rediss://'):
@@ -38,6 +39,16 @@ celery = Celery(
     backend=backend_url,
     broker_transport_options=broker_transport_options
 )
+
+# Configure Celery for 3 concurrent workers
+celery.conf.update(
+    worker_concurrency=CELERY_CONCURRENCY,  # Use environment variable
+    worker_prefetch_multiplier=1,           # Process one task at a time per worker
+    task_acks_late=True,                   # Better error handling
+    worker_max_tasks_per_child=100,        # Recycle worker after 100 tasks to prevent memory leaks
+)
+
+logger.info(f"Celery configured with concurrency: {CELERY_CONCURRENCY}, prefetch: 1, max_tasks_per_child: 100")
 
 @celery.task(name='src.tasks.process_image_edit', soft_time_limit=600, time_limit=660)
 def process_image_edit(edit_id: int):
