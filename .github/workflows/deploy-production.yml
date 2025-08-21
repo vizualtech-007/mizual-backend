@@ -32,9 +32,9 @@ jobs:
           script: |
             # Set environment based on branch
             if [ "${{ github.ref_name }}" = "main" ]; then
-              DEPLOY_ENV="production"
+              export DEPLOY_ENV="production"
             else
-              DEPLOY_ENV="dev"
+              export DEPLOY_ENV="dev"
             fi
             
             echo "Deploying $DEPLOY_ENV environment (${{ github.ref_name }} branch)"
@@ -52,11 +52,12 @@ jobs:
               echo "Stopping existing containers..."
               cd /opt/mizual
               if command -v docker-compose &> /dev/null; then
-                DEPLOY_ENV=$DEPLOY_ENV docker-compose -f docker-compose.prod.yml down || true
+                docker-compose -f docker-compose.prod.yml down || true
               else
-                DEPLOY_ENV=$DEPLOY_ENV docker compose -f docker-compose.prod.yml down || true
+                docker compose -f docker-compose.prod.yml down || true
               fi
-              echo "Containers stopped"
+              docker system prune -f || true
+              echo "Containers stopped and cleaned"
             fi
             
             # Clean setup
@@ -82,12 +83,12 @@ jobs:
             echo "Using DEPLOY_ENV=$DEPLOY_ENV (will look for .env.$DEPLOY_ENV)"
             if command -v docker-compose &> /dev/null; then
                 echo "Using docker-compose (legacy)"
-                DEPLOY_ENV=$DEPLOY_ENV docker-compose -f docker-compose.prod.yml pull
-                DEPLOY_ENV=$DEPLOY_ENV docker-compose -f docker-compose.prod.yml up -d --build
+                docker-compose -f docker-compose.prod.yml pull
+                docker-compose -f docker-compose.prod.yml up -d --build
             else
                 echo "Using docker compose (modern)"
-                DEPLOY_ENV=$DEPLOY_ENV docker compose -f docker-compose.prod.yml pull
-                DEPLOY_ENV=$DEPLOY_ENV docker compose -f docker-compose.prod.yml up -d --build
+                docker compose -f docker-compose.prod.yml pull
+                docker compose -f docker-compose.prod.yml up -d --build
             fi
             
             echo "Deployment completed"
