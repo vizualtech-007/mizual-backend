@@ -9,7 +9,7 @@ import pyvips
 import os
 from ..logger import logger
 
-class BaseLLMProvider(ABC):
+class LLMProvider(ABC):
     """Abstract base class for LLM providers"""
     
     def __init__(self):

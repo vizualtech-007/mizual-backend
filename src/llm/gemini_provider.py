@@ -5,10 +5,10 @@ Gemini LLM Provider Implementation
 import os
 from io import BytesIO
 import google.generativeai as genai
-from .base import BaseLLMProvider
+from .base import LLMProvider
 from ..logger import logger
 
-class GeminiProvider(BaseLLMProvider):
+class GeminiProvider(LLMProvider):
     """Google Gemini implementation of LLM Provider"""
     
     def __init__(self):
@@ -25,10 +25,8 @@ class GeminiProvider(BaseLLMProvider):
         self.model_name = os.environ.get("LLM_MODEL", "gemini-1.5-flash")
         logger.info(f"Using Gemini model: {self.model_name}")
         
-        # Configure Gemini API
         genai.configure(api_key=api_key)
         
-        # Get model
         try:
             self.model = genai.GenerativeModel(self.model_name)
             logger.info(f"Successfully initialized Gemini model: {self.model_name}")
@@ -50,10 +48,8 @@ class GeminiProvider(BaseLLMProvider):
         logger.info(f"Enhancing prompt with Gemini: '{prompt}'")
         
         try:
-            # Resize image using PyVips (returns bytes directly)
             img_bytes = self.resize_image(image_data)
             
-            # Use exact same system prompt as original working version
             system_prompt = f"""You are a multi-role AI assistant that will perform a complete image editing workflow analysis in sequential steps. You must complete ALL steps in order and provide your final output.
 
 ## STEP 1: WORKFLOW PLANNING
@@ -65,7 +61,7 @@ You are a highly analytical visual expert. Analyze the image and user's request,
     *   **Crucial Rule:** Your primary source of truth for all geometry and spatial relationships is the **provided image**.
     *   Identify the main object and all physically connected parts.
     *   Write a detailed, factual description of this 'Complete Subject.' You MUST include:
-        *   **Component Parts**: A list of all parts (e.g., "blue machine", "hose", "chamber").
+        *   **Component Parts**: A list of all parts (e.g., \"blue machine\", \"hose\", \"chamber\").
         *   **Proportions and Scale**: Describe the shape and size of each part relative to the others.
         *   **Spatial Relationships**: Describe how the parts are connected.
 
@@ -79,16 +75,16 @@ You are a highly analytical visual expert. Analyze the image and user's request,
 
 **4. Create JSON Output:**
     Create your complete plan in a single, valid JSON object with this structure:
-    {{
-      "subject_to_preserve": {{
-          "component_parts": ["list", "of", "parts"],
-          "description": "The highly detailed description of the 'Complete Subject', based ONLY on the visual evidence in the image."
-      }},
-      "background_edit_instruction": "The instruction for what to do with the background.",
-      "detail_edit_instructions": [
-        "A list of instructions for small edits on the subject."
+    {{{{
+      \"subject_to_preserve\": {{{{ 
+          \"component_parts\": [\"list\", \"of\", \"parts\"], 
+          \"description\": \"The highly detailed description of the 'Complete Subject', based ONLY on the visual evidence in the image.\"
+      }}}}, 
+      \"background_edit_instruction\": \"The instruction for what to do with the background.\",
+      \"detail_edit_instructions\": [
+        \"A list of instructions for small edits on the subject.\"
       ]
-    }}
+    }}}} 
 
 ## STEP 2: PLAN VALIDATION
 Now switch roles. You are a quality assurance expert with a keen eye. Review the JSON plan you just created and compare the `description` inside the `subject_to_preserve` key against the image.
@@ -141,24 +137,22 @@ You must structure your complete response EXACTLY as follows:
 
 Remember: Complete ALL three steps in sequence. Do not skip any step. The final prompt must be plain text without any markdown formatting."""
             
-            # Create Gemini prompt
+            mime_type = self._get_image_format(img_bytes)
             prompt_parts = [
                 system_prompt,
-                {"mime_type": "image/jpeg", "data": img_bytes}
+                {"mime_type": f"image/{mime_type}" if mime_type != 'unknown' else "image/jpeg", "data": img_bytes}
             ]
             generation_config = {
-                "temperature": 0.1,  # Lower temperature for more deterministic output
-                "top_p": 0.95,  # Slightly reduced to balance speed and quality
-                "max_output_tokens": 2048,  # Enough for detailed response
+                "temperature": 0.1,
+                "top_p": 0.95,
+                "max_output_tokens": 2048,
             }
-            # Generate response with timeout
             response = self.model.generate_content(
-                prompt_parts,
+                *prompt_parts,
                 generation_config=generation_config,
                 stream=False
             )
             
-            # Parse the response using exact same logic as simple_query_v2.py
             response_text = response.text
             
             lines = response_text.split('\n')
@@ -171,20 +165,16 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
                 if 'STEP 3 - FINAL PROMPT:' in line or 'FINAL PROMPT:' in line:
                     in_prompt_section = True
                     prompt_lines = []
-                    # Collect lines after this, skipping markdown formatting
                     for j in range(i + 1, len(lines)):
                         current_line = lines[j].strip()
 
-                        # Check for code block markers
                         if current_line == '```':
                             in_code_block = not in_code_block
                             continue
 
-                        # Skip empty lines and headers
                         if not current_line or current_line.startswith('#'):
                             continue
 
-                        # Add non-empty lines that aren't markdown
                         if current_line and not current_line.startswith('```'):
                             prompt_lines.append(current_line)
 
@@ -193,16 +183,14 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
                         break
             
             if final_prompt:
-                # Log success
                 logger.info(f"Gemini enhancement completed")
                 logger.info(f"Original prompt: '{prompt}'")
                 logger.info(f"Enhanced prompt: '{final_prompt}'")
                 return final_prompt
             else:
                 logger.info(f"Could not extract final prompt from Gemini response")
-                return None
+                return prompt
             
         except Exception as e:
             logger.info(f"Gemini enhancement failed: {str(e)}")
-            # Return None to indicate failure - will fall back to original prompt
-            return None
+            return prompt
