@@ -1,24 +1,16 @@
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from src import models, schemas, database, s3, tasks, db_raw
-from src.database import engine
+from src import schemas, s3, tasks, db_raw
 
 import uuid
 import base64
 import os
 from src.logger import logger
-
-
-import os
-
-models.Base.metadata.create_all(bind=engine)
 
 # Rate limiting configuration from environment variables
 RATE_LIMIT_DAILY_IMAGES = os.environ.get("RATE_LIMIT_DAILY_IMAGES", "3")
@@ -167,47 +159,49 @@ async def celery_health_check(request: Request):
 async def debug_database_schema(request: Request):
     """Debug endpoint to check database schema and table structure"""
     try:
-        db = next(database.get_db())
-        
-        # Check current schema path
-        schema_result = db.execute(text("SHOW search_path")).fetchone()
-        current_schema = schema_result[0] if schema_result else "unknown"
-        
-        # Check if edits table exists and get its columns
-        table_check = db.execute(text("""
-            SELECT column_name, data_type, is_nullable, column_default
-            FROM information_schema.columns 
-            WHERE table_name = 'edits' 
-            AND table_schema = ANY(current_schemas(false))
-            ORDER BY ordinal_position
-        """)).fetchall()
-        
-        # Check environment variable
-        environment = os.environ.get("ENVIRONMENT", "unknown")
-        
-        return {
-            "environment": environment,
-            "current_schema_path": current_schema,
-            "edits_table_columns": [
-                {
-                    "column_name": row[0],
-                    "data_type": row[1], 
-                    "is_nullable": row[2],
-                    "column_default": row[3]
-                } for row in table_check
-            ],
-            "has_processing_stage": any(row[0] == 'processing_stage' for row in table_check)
-        }
+        conn = db_raw.get_connection()
+        try:
+            with conn.cursor() as cur:
+                # Check current schema path
+                cur.execute("SHOW search_path")
+                schema_result = cur.fetchone()
+                current_schema = schema_result[0] if schema_result else "unknown"
+                
+                # Check if edits table exists and get its columns
+                cur.execute("""
+                    SELECT column_name, data_type, is_nullable, column_default
+                    FROM information_schema.columns 
+                    WHERE table_name = 'edits' 
+                    AND table_schema = ANY(current_schemas(false))
+                    ORDER BY ordinal_position
+                """)
+                table_check = cur.fetchall()
+                
+                # Check environment variable
+                environment = os.environ.get("ENVIRONMENT", "unknown")
+                
+                return {
+                    "environment": environment,
+                    "current_schema_path": current_schema,
+                    "edits_table_columns": [
+                        {
+                            "column_name": row[0],
+                            "data_type": row[1], 
+                            "is_nullable": row[2],
+                            "column_default": row[3]
+                        } for row in table_check
+                    ],
+                    "has_processing_stage": any(row[0] == 'processing_stage' for row in table_check)
+                }
+        finally:
+            db_raw.return_connection(conn)
     except Exception as e:
         return {"error": f"Database schema check failed: {str(e)}"}
-    finally:
-        if 'db' in locals():
-            db.close()
 
 @app.post("/edit-image/", response_model=schemas.EditCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_DAILY_IMAGES}/day")  # Configurable daily limit per IP
 @limiter.limit(f"1/{RATE_LIMIT_BURST_SECONDS}seconds")  # Configurable burst protection per IP
-async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, db: Session = Depends(database.get_db)):
+async def edit_image_endpoint(request: Request, edit_request: EditImageRequest):
     # Validate follow-up editing if parent_edit_uuid is provided
     if edit_request.parent_edit_uuid:
         # Check if parent edit exists
@@ -289,7 +283,7 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
 
 @app.get("/edit/{edit_uuid}", response_model=schemas.EditStatusResponse)
 @limiter.limit(f"{RATE_LIMIT_STATUS_CHECKS_PER_MINUTE}/minute")  # Configurable status check limit
-def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
+def get_edit_status(request: Request, edit_uuid: str):
     from src.status_messages import get_status_message
     
     db_edit = db_raw.get_edit_by_uuid(edit_uuid)
@@ -314,7 +308,7 @@ def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(data
 
 @app.post("/feedback/", response_model=schemas.FeedbackResponse)
 @limiter.limit("5/minute")  # Limit feedback submissions to prevent spam
-async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate, db: Session = Depends(database.get_db)):
+async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate):
     """Submit feedback for an edit result"""
     
     # Get user IP for analytics
@@ -353,12 +347,12 @@ async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate, db
     return {
         "success": True,
         "message": "Thank you for your feedback!",
-        "feedback_id": db_feedback.id
+        "feedback_id": feedback.edit_uuid  # Use edit_uuid as identifier since we don't have auto-increment ID
     }
 
 @app.get("/feedback/{edit_uuid}", response_model=schemas.Feedback)
 @limiter.limit("10/minute")  # Allow checking feedback status
-async def get_feedback_for_edit(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
+async def get_feedback_for_edit(request: Request, edit_uuid: str):
     """Get feedback for a specific edit (optional endpoint for checking if feedback exists)"""
     
     # Validate that the edit exists
@@ -375,7 +369,7 @@ async def get_feedback_for_edit(request: Request, edit_uuid: str, db: Session = 
 
 @app.get("/chain/{edit_uuid}")
 @limiter.limit("10/minute")  # Allow checking chain history
-async def get_edit_chain_history(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
+async def get_edit_chain_history(request: Request, edit_uuid: str):
     """Get the complete chain history for an edit"""
     
     # Validate that the edit exists

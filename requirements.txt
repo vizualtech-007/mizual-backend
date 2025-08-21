@@ -11,5 +11,4 @@ python-multipart==0.0.9
 pyvips==2.2.3
 redis==5.0.4
 slowapi==0.1.9
-sqlalchemy==2.0.29
 uvicorn==0.29.0

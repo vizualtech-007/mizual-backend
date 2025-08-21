@@ -1,12 +1,15 @@
 """
-Raw psycopg database operations for maximum performance and reliability.
+Raw psycopg database operations with connection pooling for maximum performance and reliability.
 Eliminates prepared statement issues and reduces memory usage.
+Unified database interface for both API and Celery operations.
 """
 import os
 import psycopg
+from psycopg.pool import ConnectionPool
 from typing import Optional, Dict, Any, List
 from .logger import logger
 import uuid
+import threading
 
 # Database configuration with error handling
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -15,21 +18,55 @@ if not DATABASE_URL:
 
 DATABASE_SCHEMA = os.environ.get("DATABASE_SCHEMA", "public")
 
+# Global connection pool - thread-safe
+_connection_pool: Optional[ConnectionPool] = None
+_pool_lock = threading.Lock()
+
+def get_connection_pool():
+    """Get or create the global connection pool (thread-safe)"""
+    global _connection_pool
+    
+    if _connection_pool is None:
+        with _pool_lock:
+            if _connection_pool is None:  # Double-check locking
+                logger.info(f"Initializing database connection pool for schema: {DATABASE_SCHEMA}")
+                _connection_pool = ConnectionPool(
+                    DATABASE_URL,
+                    min_size=3,      # Minimum connections
+                    max_size=8,      # Maximum connections (good for 3 concurrent workers)
+                    timeout=10,      # Connection timeout
+                    max_idle=300,    # Close idle connections after 5 minutes
+                    kwargs={
+                        "autocommit": True,
+                        "options": f"-csearch_path={DATABASE_SCHEMA},public"
+                    }
+                )
+                logger.info("Database connection pool initialized successfully")
+    
+    return _connection_pool
+
 def get_connection():
-    """Get a raw psycopg connection that never uses prepared statements"""
-    # Nuclear option: Force autocommit mode and simple query protocol
-    conn = psycopg.connect(
-        DATABASE_URL,
-        autocommit=True,  # No transactions, no prepared statements
-        options=f"-csearch_path={DATABASE_SCHEMA},public"
-    )
-    # Force simple query protocol
-    conn.execute(f"SET search_path TO {DATABASE_SCHEMA}, public")
+    """Get a connection from the pool with proper schema setup"""
+    pool = get_connection_pool()
+    conn = pool.getconn()
+    
+    # Ensure proper schema is set (pool kwargs should handle this, but double-check)
+    try:
+        conn.execute(f"SET search_path TO {DATABASE_SCHEMA}, public")
+    except Exception as e:
+        logger.warning(f"Failed to set search_path: {e}")
+    
     return conn
 
+def return_connection(conn):
+    """Return connection to pool"""
+    pool = get_connection_pool()
+    pool.putconn(conn)
+
 def get_edit_by_id(edit_id: int) -> Optional[Dict[str, Any]]:
-    """Get edit by ID - single database call"""
-    with get_connection() as conn:
+    """Get edit by ID - single database call using connection pool"""
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id, uuid, prompt, enhanced_prompt, original_image_url, 
@@ -52,10 +89,13 @@ def get_edit_by_id(edit_id: int) -> Optional[Dict[str, Any]]:
                 'processing_stage': row[7],
                 'created_at': row[8]
             }
+    finally:
+        return_connection(conn)
 
 def get_edit_by_uuid(edit_uuid: str) -> Optional[Dict[str, Any]]:
-    """Get edit by UUID - single database call"""
-    with get_connection() as conn:
+    """Get edit by UUID - single database call using connection pool"""
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id, uuid, prompt, enhanced_prompt, original_image_url, 
@@ -78,12 +118,15 @@ def get_edit_by_uuid(edit_uuid: str) -> Optional[Dict[str, Any]]:
                 'processing_stage': row[7],
                 'created_at': row[8]
             }
+    finally:
+        return_connection(conn)
 
 def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = None, parent_edit_uuid: str = None) -> Dict[str, Any]:
     """Create new edit - single database call with optional chain creation"""
     edit_uuid = str(uuid.uuid4())
     
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             # Insert edit with created_at
             cur.execute("""
@@ -125,40 +168,52 @@ def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = Non
                 """, (edit_uuid, parent_edit_uuid, chain_position))
             
             return edit_data
+    finally:
+        return_connection(conn)
 
 def update_edit_status(edit_id: int, status: str) -> bool:
     """Update edit status - single database call"""
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE edits SET status = %s WHERE id = %s
             """, (status, edit_id))
             
             return cur.rowcount > 0
+    finally:
+        return_connection(conn)
 
 def update_edit_processing_stage(edit_id: int, processing_stage: str) -> bool:
     """Update processing stage - single database call"""
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE edits SET processing_stage = %s WHERE id = %s
             """, (processing_stage, edit_id))
             
             return cur.rowcount > 0
+    finally:
+        return_connection(conn)
 
 def update_edit_enhanced_prompt(edit_id: int, enhanced_prompt: str) -> bool:
     """Update enhanced prompt - single database call"""
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE edits SET enhanced_prompt = %s WHERE id = %s
             """, (enhanced_prompt, edit_id))
             
             return cur.rowcount > 0
+    finally:
+        return_connection(conn)
 
 def update_edit_with_result(edit_id: int, status: str, edited_image_url: str) -> bool:
     """Update edit with final result - single database call"""
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE edits 
@@ -167,10 +222,13 @@ def update_edit_with_result(edit_id: int, status: str, edited_image_url: str) ->
             """, (status, edited_image_url, edit_id))
             
             return cur.rowcount > 0
+    finally:
+        return_connection(conn)
 
 def get_edit_chain_history(edit_uuid: str) -> List[Dict[str, Any]]:
     """Get complete edit chain history - single optimized query"""
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             cur.execute("""
                 WITH RECURSIVE edit_chain AS (
@@ -217,10 +275,13 @@ def get_edit_chain_history(edit_uuid: str) -> List[Dict[str, Any]]:
                 }
                 for row in rows
             ]
+    finally:
+        return_connection(conn)
 
 def create_edit_feedback(edit_uuid: str, rating: int, feedback_text: str = None, user_ip: str = None) -> bool:
     """Create edit feedback - single database call"""
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             try:
                 cur.execute("""
@@ -232,10 +293,13 @@ def create_edit_feedback(edit_uuid: str, rating: int, feedback_text: str = None,
             except psycopg.IntegrityError:
                 # Feedback already exists for this edit
                 return False
+    finally:
+        return_connection(conn)
 
 def get_edit_feedback(edit_uuid: str) -> Optional[Dict[str, Any]]:
     """Get edit feedback - single database call"""
-    with get_connection() as conn:
+    conn = get_connection()
+    try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT edit_uuid, rating, feedback_text, user_ip, created_at
@@ -253,5 +317,7 @@ def get_edit_feedback(edit_uuid: str) -> Optional[Dict[str, Any]]:
                 'user_ip': row[3],
                 'created_at': row[4]
             }
+    finally:
+        return_connection(conn)
 
 logger.info("Raw psycopg database module initialized with prepare_threshold=0")
