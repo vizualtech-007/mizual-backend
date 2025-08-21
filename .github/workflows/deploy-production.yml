@@ -23,6 +23,14 @@ jobs:
             echo "ENV_FILE=.env.dev" >> $GITHUB_OUTPUT
           fi
 
+      - name: Create .env file from secret
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "${{ secrets.ENV_FILE_PROD }}" > .env
+          else
+            echo "${{ secrets.ENV_FILE_DEV }}" > .env
+          fi
+
       - name: Deploy to Lightsail
         uses: appleboy/ssh-action@v0.1.5
         with:
@@ -38,14 +46,6 @@ jobs:
             fi
             
             echo "Deploying $DEPLOY_ENV environment (${{ github.ref_name }} branch)"
-            echo "Looking for .env.$DEPLOY_ENV file"
-            
-            # Preserve environment file
-            ENV_FILE=".env.$DEPLOY_ENV"
-            if [ -f /opt/mizual/$ENV_FILE ]; then
-              cp /opt/mizual/$ENV_FILE /tmp/$ENV_FILE.backup
-              echo "Backed up $ENV_FILE"
-            fi
             
             # Stop existing containers before cleanup
             if [ -d /opt/mizual ]; then
@@ -68,19 +68,10 @@ jobs:
             git clone https://github.com/vizualtech-007/mizual-backend.git .
             git checkout ${{ github.ref_name }}
             
-            # Restore environment file
-            if [ -f /tmp/$ENV_FILE.backup ]; then
-              cp /tmp/$ENV_FILE.backup $ENV_FILE
-              echo "Restored $ENV_FILE"
-            else
-              echo "Warning: $ENV_FILE backup not found"
-            fi
-            
             # Deploy with specified environment
             echo "Starting deployment with Docker Compose..."
             
             # Check which docker compose command is available
-            echo "Using DEPLOY_ENV=$DEPLOY_ENV (will look for .env.$DEPLOY_ENV)"
             if command -v docker-compose &> /dev/null; then
                 echo "Using docker-compose (legacy)"
                 docker-compose -f docker-compose.prod.yml pull
@@ -92,6 +83,15 @@ jobs:
             fi
             
             echo "Deployment completed"
+      
+      - name: Copy .env file to server
+        uses: appleboy/scp-action@v0.1.5
+        with:
+          host: ${{ steps.env.outputs.TARGET_HOST }}
+          username: ubuntu
+          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
+          source: ".env"
+          target: "/opt/mizual/"
             
       - name: Health Check
         uses: appleboy/ssh-action@v0.1.5
