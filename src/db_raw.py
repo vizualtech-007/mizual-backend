@@ -91,43 +91,16 @@ def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = Non
     
     with get_connection() as conn:
         with conn.cursor() as cur:
-            # Use a single transaction for both edit creation and chain insertion
-            if parent_edit_uuid:
-                # Optimized query: create edit and chain in single transaction
-                cur.execute("""
-                    WITH new_edit AS (
-                        INSERT INTO edits (uuid, prompt, enhanced_prompt, original_image_url, status, processing_stage, created_at)
-                        VALUES (%s, %s, %s, %s, 'pending', 'pending', NOW())
-                        RETURNING id, uuid, prompt, enhanced_prompt, original_image_url, 
-                                 edited_image_url, status, processing_stage, created_at
-                    ),
-                    chain_position AS (
-                        SELECT COALESCE(MAX(chain_position), 0) + 1 as pos
-                        FROM edit_chains ec
-                        JOIN edits e ON ec.edit_uuid = e.uuid
-                        WHERE e.uuid = %s OR ec.parent_edit_uuid = %s
-                    )
-                    INSERT INTO edit_chains (edit_uuid, parent_edit_uuid, chain_position)
-                    SELECT %s, %s, pos FROM chain_position;
-                    
-                    SELECT id, uuid, prompt, enhanced_prompt, original_image_url, 
-                           edited_image_url, status, processing_stage, created_at
-                    FROM edits WHERE uuid = %s
-                """, (edit_uuid, prompt, enhanced_prompt, original_image_url, 
-                      parent_edit_uuid, parent_edit_uuid, 
-                      edit_uuid, parent_edit_uuid, 
-                      edit_uuid))
-            else:
-                # Simple edit creation without chain
-                cur.execute("""
-                    INSERT INTO edits (uuid, prompt, enhanced_prompt, original_image_url, status, processing_stage, created_at)
-                    VALUES (%s, %s, %s, %s, 'pending', 'pending', NOW())
-                    RETURNING id, uuid, prompt, enhanced_prompt, original_image_url, 
-                             edited_image_url, status, processing_stage, created_at
-                """, (edit_uuid, prompt, enhanced_prompt, original_image_url))
+            # First create the edit
+            cur.execute("""
+                INSERT INTO edits (uuid, prompt, enhanced_prompt, original_image_url, status, processing_stage, created_at)
+                VALUES (%s, %s, %s, %s, 'pending', 'pending', NOW())
+                RETURNING id, uuid, prompt, enhanced_prompt, original_image_url, 
+                         edited_image_url, status, processing_stage, created_at
+            """, (edit_uuid, prompt, enhanced_prompt, original_image_url))
             
             row = cur.fetchone()
-            return {
+            edit_result = {
                 'id': row[0],
                 'uuid': row[1],
                 'prompt': row[2],
@@ -138,6 +111,26 @@ def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = Non
                 'processing_stage': row[7],
                 'created_at': row[8]
             }
+            
+            # If this is a chain edit, create the chain entry separately
+            if parent_edit_uuid:
+                # Get the chain position
+                cur.execute("""
+                    SELECT COALESCE(MAX(chain_position), 0) + 1 as pos
+                    FROM edit_chains ec
+                    JOIN edits e ON ec.edit_uuid = e.uuid
+                    WHERE e.uuid = %s OR ec.parent_edit_uuid = %s
+                """, (parent_edit_uuid, parent_edit_uuid))
+                
+                chain_position = cur.fetchone()[0]
+                
+                # Insert the chain entry
+                cur.execute("""
+                    INSERT INTO edit_chains (edit_uuid, parent_edit_uuid, chain_position)
+                    VALUES (%s, %s, %s)
+                """, (edit_uuid, parent_edit_uuid, chain_position))
+            
+            return edit_result
 
 def update_edit_status(edit_id: int, status: str) -> bool:
     """Update edit status - single database call"""
