@@ -8,8 +8,11 @@ from typing import Optional, Dict, Any, List
 from .logger import logger
 import uuid
 
-# Database configuration
+# Database configuration with error handling
 DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is not set")
+
 DATABASE_SCHEMA = os.environ.get("DATABASE_SCHEMA", "public")
 
 def get_connection():
@@ -47,7 +50,7 @@ def get_edit_by_id(edit_id: int) -> Optional[Dict[str, Any]]:
                 'edited_image_url': row[5],
                 'status': row[6],
                 'processing_stage': row[7],
-                'created_at': row[8].isoformat() if row[8] else None
+                'created_at': row[8]
             }
 
 def get_edit_by_uuid(edit_uuid: str) -> Optional[Dict[str, Any]]:
@@ -73,7 +76,7 @@ def get_edit_by_uuid(edit_uuid: str) -> Optional[Dict[str, Any]]:
                 'edited_image_url': row[5],
                 'status': row[6],
                 'processing_stage': row[7],
-                'created_at': row[8].isoformat() if row[8] else None
+                'created_at': row[8]
             }
 
 def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = None, parent_edit_uuid: str = None) -> Dict[str, Any]:
@@ -82,10 +85,10 @@ def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = Non
     
     with get_connection() as conn:
         with conn.cursor() as cur:
-            # Insert edit
+            # Insert edit with created_at
             cur.execute("""
-                INSERT INTO edits (uuid, prompt, enhanced_prompt, original_image_url, status, processing_stage)
-                VALUES (%s, %s, %s, %s, 'pending', 'pending')
+                INSERT INTO edits (uuid, prompt, enhanced_prompt, original_image_url, status, processing_stage, created_at)
+                VALUES (%s, %s, %s, %s, 'pending', 'pending', NOW())
                 RETURNING id, uuid, prompt, enhanced_prompt, original_image_url, 
                          edited_image_url, status, processing_stage, created_at
             """, (edit_uuid, prompt, enhanced_prompt, original_image_url))
