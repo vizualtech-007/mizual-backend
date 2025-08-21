@@ -15,12 +15,7 @@ import base64
 import os
 from src.logger import logger
 
-# Import LLM provider factory
-try:
-    from src.llm import get_provider
-    LLM_AVAILABLE = True
-except ImportError:
-    LLM_AVAILABLE = False
+
 import os
 
 models.Base.metadata.create_all(bind=engine)
