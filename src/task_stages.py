@@ -204,13 +204,13 @@ def process_edit_with_stage_retries(edit_id: int):
             logger.info(f"TASK ERROR: Edit {edit_id} not found in database")
             return
 
-        tracker = PerformanceTracker(edit.id, edit.uuid)
+        tracker = PerformanceTracker(edit['id'], edit['uuid'])
         # Set start time to when the request was created for end-to-end measurement
-        tracker.start_time = edit.created_at.replace(tzinfo=timezone.utc).timestamp()
+        tracker.start_time = edit['created_at'].replace(tzinfo=timezone.utc).timestamp()
         
-        logger.info(f"TASK PROCESSING: Edit {edit_id} with UUID {edit.uuid}")
-        logger.info(f"Original prompt: '{edit.prompt}'")
-        logger.info(f"Enhanced prompt: '{edit.enhanced_prompt}'")
+        logger.info(f"TASK PROCESSING: Edit {edit_id} with UUID {edit['uuid']}")
+        logger.info(f"Original prompt: '{edit['prompt']}'")
+        logger.info(f"Enhanced prompt: '{edit['enhanced_prompt']}'")
         
         # Initialize processing - Update status immediately
         tracker.start_stage("initialization")

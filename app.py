@@ -279,7 +279,7 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     logger.info(f"API: Verified stage is now '{updated_edit['processing_stage']}' for edit {edit['id']}")
     
     # Process the image edit asynchronously with the final prompt
-    tasks.celery.send_task('src.tasks.process_image_edit', args=[edit['id']])
+    tasks.celery.send_task('mizual.image_edit_processor', args=[edit['id']])
     
     logger.info(f"Edit request queued for processing with UUID: {edit['uuid']}")
 
