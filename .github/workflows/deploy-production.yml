@@ -47,6 +47,18 @@ jobs:
               echo "Backed up $ENV_FILE"
             fi
             
+            # Stop existing containers before cleanup
+            if [ -d /opt/mizual ]; then
+              echo "Stopping existing containers..."
+              cd /opt/mizual
+              if command -v docker-compose &> /dev/null; then
+                DEPLOY_ENV=$DEPLOY_ENV docker-compose -f docker-compose.prod.yml down || true
+              else
+                DEPLOY_ENV=$DEPLOY_ENV docker compose -f docker-compose.prod.yml down || true
+              fi
+              echo "Containers stopped"
+            fi
+            
             # Clean setup
             sudo rm -rf /opt/mizual
             sudo mkdir -p /opt/mizual
