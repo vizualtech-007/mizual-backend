@@ -279,7 +279,7 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     logger.info(f"API: Verified stage is now '{updated_edit['processing_stage']}' for edit {edit['id']}")
     
     # Process the image edit asynchronously with the final prompt
-    tasks.celery.send_task('mizual.image_edit_processor', args=[edit['id']])
+    tasks.celery.send_task('src.tasks.process_image_edit', args=[edit['id']])
     
     logger.info(f"Edit request queued for processing with UUID: {edit['uuid']}")
 
@@ -297,19 +297,19 @@ def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(data
         raise HTTPException(status_code=404, detail="Edit not found")
     
     # Get user-friendly progress information
-    progress_info = get_status_message(db_edit.status, db_edit.processing_stage)
+    progress_info = get_status_message(db_edit['status'], db_edit['processing_stage'])
     
     return {
         "uuid": db_edit['uuid'],
-        "status": db_edit.status,
-        "processing_stage": db_edit.processing_stage,
+        "status": db_edit['status'],
+        "processing_stage": db_edit['processing_stage'],
         "message": progress_info["message"],
         "progress_percent": progress_info["progress_percent"],
         "is_complete": progress_info["is_complete"],
         "is_error": progress_info["is_error"],
-        "edited_image_url": db_edit.edited_image_url,
-        "prompt": db_edit.prompt,
-        "created_at": db_edit.created_at
+        "edited_image_url": db_edit['edited_image_url'],
+        "prompt": db_edit['prompt'],
+        "created_at": db_edit['created_at']
     }
 
 @app.post("/feedback/", response_model=schemas.FeedbackResponse)
