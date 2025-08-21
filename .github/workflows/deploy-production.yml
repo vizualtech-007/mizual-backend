@@ -16,12 +16,10 @@ jobs:
           if [ "${{ github.ref_name }}" = "main" ]; then
             echo "ENVIRONMENT=production" >> $GITHUB_OUTPUT
             echo "TARGET_HOST=${{ secrets.LIGHTSAIL_PROD_HOST }}" >> $GITHUB_OUTPUT
-            echo "SSH_KEY=${{ secrets.LIGHTSAIL_PROD_SSH_KEY }}" >> $GITHUB_OUTPUT
             echo "ENV_FILE=.env.production" >> $GITHUB_OUTPUT
           else
             echo "ENVIRONMENT=preview" >> $GITHUB_OUTPUT
             echo "TARGET_HOST=${{ secrets.LIGHTSAIL_DEV_HOST }}" >> $GITHUB_OUTPUT
-            echo "SSH_KEY=${{ secrets.LIGHTSAIL_DEV_SSH_KEY }}" >> $GITHUB_OUTPUT
             echo "ENV_FILE=.env.dev" >> $GITHUB_OUTPUT
           fi
 
@@ -30,7 +28,7 @@ jobs:
         with:
           host: ${{ steps.env.outputs.TARGET_HOST }}
           username: ubuntu
-          key: ${{ steps.env.outputs.SSH_KEY }}
+          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
           script: |
             # Set environment based on branch
             DEPLOY_ENV="${{ steps.env.outputs.ENVIRONMENT }}"
@@ -68,7 +66,7 @@ jobs:
         with:
           host: ${{ steps.env.outputs.TARGET_HOST }}
           username: ubuntu
-          key: ${{ steps.env.outputs.SSH_KEY }}
+          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
           script: |
             sleep 30
             curl -f http://localhost:80/health || exit 1
