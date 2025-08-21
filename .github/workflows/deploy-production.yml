@@ -31,11 +31,17 @@ jobs:
           key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
           script: |
             # Set environment based on branch
-            DEPLOY_ENV="${{ steps.env.outputs.ENVIRONMENT }}"
-            ENV_FILE="${{ steps.env.outputs.ENV_FILE }}"
+            if [ "${{ github.ref_name }}" = "main" ]; then
+              DEPLOY_ENV="production"
+            else
+              DEPLOY_ENV="dev"
+            fi
+            
             echo "Deploying $DEPLOY_ENV environment (${{ github.ref_name }} branch)"
+            echo "Looking for .env.$DEPLOY_ENV file"
             
             # Preserve environment file
+            ENV_FILE=".env.$DEPLOY_ENV"
             if [ -f /opt/mizual/$ENV_FILE ]; then
               cp /opt/mizual/$ENV_FILE /tmp/$ENV_FILE.backup
               echo "Backed up $ENV_FILE"
@@ -61,6 +67,7 @@ jobs:
             echo "Starting deployment with Docker Compose..."
             
             # Check which docker compose command is available
+            echo "Using DEPLOY_ENV=$DEPLOY_ENV (will look for .env.$DEPLOY_ENV)"
             if command -v docker-compose &> /dev/null; then
                 echo "Using docker-compose (legacy)"
                 DEPLOY_ENV=$DEPLOY_ENV docker-compose -f docker-compose.prod.yml pull
