@@ -6,6 +6,7 @@ import redis
 import json
 import os
 from typing import Optional, Dict, Any, List
+from datetime import datetime
 from .logger import logger
 
 # Redis configuration
@@ -38,12 +39,18 @@ def _make_key(prefix: str, identifier: str) -> str:
     """Create cache key with environment prefix"""
     return f"{ENVIRONMENT}:cache:{prefix}:{identifier}"
 
+def _json_serializer(obj):
+    """JSON serializer for objects not serializable by default json code"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
 def cache_edit_status(edit_uuid: str, status_data: Dict[str, Any]) -> None:
     """Cache edit status data"""
     try:
         client = get_redis_client()
         key = _make_key("edit_status", edit_uuid)
-        client.setex(key, CACHE_TTL_EDIT_STATUS, json.dumps(status_data))
+        client.setex(key, CACHE_TTL_EDIT_STATUS, json.dumps(status_data, default=_json_serializer))
         logger.debug(f"Cached edit status for {edit_uuid}")
     except Exception as e:
         logger.warning(f"Failed to cache edit status: {e}")
@@ -77,7 +84,7 @@ def cache_edit_feedback(edit_uuid: str, feedback_data: Dict[str, Any]) -> None:
     try:
         client = get_redis_client()
         key = _make_key("edit_feedback", edit_uuid)
-        client.setex(key, CACHE_TTL_EDIT_FEEDBACK, json.dumps(feedback_data))
+        client.setex(key, CACHE_TTL_EDIT_FEEDBACK, json.dumps(feedback_data, default=_json_serializer))
         logger.debug(f"Cached edit feedback for {edit_uuid}")
     except Exception as e:
         logger.warning(f"Failed to cache edit feedback: {e}")
@@ -101,7 +108,7 @@ def cache_chain_history(edit_uuid: str, chain_data: List[Dict[str, Any]]) -> Non
     try:
         client = get_redis_client()
         key = _make_key("chain_history", edit_uuid)
-        client.setex(key, CACHE_TTL_CHAIN_HISTORY, json.dumps(chain_data))
+        client.setex(key, CACHE_TTL_CHAIN_HISTORY, json.dumps(chain_data, default=_json_serializer))
         logger.debug(f"Cached chain history for {edit_uuid}")
     except Exception as e:
         logger.warning(f"Failed to cache chain history: {e}")

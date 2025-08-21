@@ -19,8 +19,8 @@ def get_http_client():
         limits = httpx.Limits(max_keepalive_connections=3, max_connections=6)
         _http_client = httpx.Client(
             timeout=timeout_config,
-            limits=limits,
-            http2=True  # Enable HTTP/2 for better performance
+            limits=limits
+            # http2=True requires httpx[http2] package
         )
     return _http_client
 from .flux_api import BFLServiceError

@@ -14,8 +14,8 @@ def get_http_client():
         limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
         _http_client = httpx.AsyncClient(
             timeout=timeout_config,
-            limits=limits,
-            http2=True  # Enable HTTP/2 for better performance
+            limits=limits
+            # http2=True requires httpx[http2] package
         )
     return _http_client
 
