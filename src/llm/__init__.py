@@ -9,8 +9,8 @@ from ..logger import logger
 # Import providers
 try:
     from .gemini_provider import GeminiProvider
-except ImportError:
-    logger.info("Warning: Gemini provider not available - missing dependencies")
+except ImportError as e:
+    logger.info(f"Warning: Gemini provider not available - import error: {e}")
     GeminiProvider = None
 
 try:
