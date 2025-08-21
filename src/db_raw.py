@@ -47,7 +47,7 @@ def get_edit_by_id(edit_id: int) -> Optional[Dict[str, Any]]:
                 'edited_image_url': row[5],
                 'status': row[6],
                 'processing_stage': row[7],
-                'created_at': row[8]
+                'created_at': row[8].isoformat() if row[8] else None
             }
 
 def get_edit_by_uuid(edit_uuid: str) -> Optional[Dict[str, Any]]:
@@ -73,7 +73,7 @@ def get_edit_by_uuid(edit_uuid: str) -> Optional[Dict[str, Any]]:
                 'edited_image_url': row[5],
                 'status': row[6],
                 'processing_stage': row[7],
-                'created_at': row[8]
+                'created_at': row[8].isoformat() if row[8] else None
             }
 
 def create_edit(prompt: str, original_image_url: str, enhanced_prompt: str = None, parent_edit_uuid: str = None) -> Dict[str, Any]:
