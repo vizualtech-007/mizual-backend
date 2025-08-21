@@ -44,10 +44,10 @@ class StageProcessor:
         logger.info(f"STAGE: Enhancing prompt for edit {self.edit_id} (API already set stage)")
         # Verify current stage before starting
         edit = self.get_edit()
-        logger.info(f"CELERY: Current stage when starting prompt enhancement: '{edit.processing_stage}'")
+        logger.info(f"CELERY: Current stage when starting prompt enhancement: '{edit['processing_stage']}'")
         
         edit = self.get_edit()
-        original_prompt = edit.prompt
+        original_prompt = edit['prompt']
         enhanced_prompt = None
         
         if LLM_AVAILABLE and os.environ.get("ENABLE_PROMPT_ENHANCEMENT", "true").lower() in ["true", "1", "yes"]:
@@ -56,11 +56,11 @@ class StageProcessor:
                 llm_provider = get_provider()
                 if llm_provider:
                     # Fetch image for prompt enhancement - Optimized
-                    logger.info(f"Fetching image for prompt enhancement from: {edit.original_image_url}")
+                    logger.info(f"Fetching image for prompt enhancement from: {edit['original_image_url']}")
                     import httpx
                     timeout = httpx.Timeout(10.0, connect=3.0)  # Even faster timeouts
                     with httpx.Client(timeout=timeout) as client:
-                        response = client.get(edit.original_image_url)
+                        response = client.get(edit['original_image_url'])
                         response.raise_for_status()
                         image_bytes = response.content
                     
@@ -101,7 +101,7 @@ class StageProcessor:
         
         # If not cached, download from S3
         edit = self.get_edit()
-        image_url = edit.original_image_url
+        image_url = edit['original_image_url']
         logger.info(f"Fetching image from: {image_url}")
         
         # Optimized HTTP request with faster timeout
@@ -136,7 +136,7 @@ class StageProcessor:
         self.update_stage("preparing_result")
         
         edit = self.get_edit()
-        edited_file_name = f"edited-{edit.uuid}.png"
+        edited_file_name = f"edited-{edit['uuid']}.png"
         
         self.update_stage("uploading_result")
         edited_image_url = s3.upload_file_to_s3(edited_image_bytes, edited_file_name)
