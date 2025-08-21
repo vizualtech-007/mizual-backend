@@ -7,16 +7,6 @@ class LLMProvider(ABC):
     def enhance_prompt(self, prompt: str, image_data: bytes) -> str:
         pass
 
-    def _is_image_a_photo(self, image_data: bytes) -> bool:
-        """Check if an image is photographic using pyvips."""
-        import pyvips
-        try:
-            # Check for a color profile, a common indicator of photos
-            image = pyvips.Image.new_from_buffer(image_data, "")
-            return image.get_typeof('icc-profile-data') != 0
-        except pyvips.Error:
-            return False
-
     def _get_image_format(self, image_data: bytes) -> str:
         """Get image format using pyvips."""
         import pyvips
@@ -27,12 +17,11 @@ class LLMProvider(ABC):
             return 'unknown'
 
     def get_final_prompt(self, prompt: str, image_data: bytes) -> str:
-        """Get the final prompt based on image type."""
-        is_photo = self._is_image_a_photo(image_data)
+        """Get the final prompt for the image."""
         image_format = self._get_image_format(image_data)
         
-        # Get the appropriate prompt template
-        prompt_template = get_prompt_template(is_photo)
+        # Get the universal prompt template
+        prompt_template = get_prompt_template()
         
         # Format the final prompt
         final_prompt = prompt_template.format(
