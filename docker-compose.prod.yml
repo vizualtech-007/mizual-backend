@@ -20,7 +20,7 @@ services:
     environment:
       - TZ=Asia/Kolkata
     env_file:
-      - .env
+      - .env.${DEPLOY_ENV:-production}
     command: python migrate.py
     networks:
       - mizual-network
@@ -39,9 +39,8 @@ services:
       - "80:8000"
     environment:
       - TZ=Asia/Kolkata
-      - PGPREPARE_THRESHOLD=0
     env_file:
-      - .env
+      - .env.${DEPLOY_ENV:-production}
     networks:
       - mizual-network
     command: gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000
@@ -68,9 +67,8 @@ services:
         condition: service_healthy
     environment:
       - TZ=Asia/Kolkata
-      - PGPREPARE_THRESHOLD=0
     env_file:
-      - .env
+      - .env.${DEPLOY_ENV:-production}
     command: celery -A src.tasks.celery worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=100
     networks:
       - mizual-network
