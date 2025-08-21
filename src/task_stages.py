@@ -5,13 +5,14 @@ Each stage can be retried independently without restarting the entire process.
 
 import asyncio
 import httpx
-from . import crud, database, flux_api, s3
+from . import flux_api, s3
 from .flux_api import BFLServiceError
 from .performance_tracker import get_performance_tracker, finish_performance_tracking
 import os
 from .performance_tracker import PerformanceTracker
 from datetime import timezone
 from .logger import logger
+from . import db_raw
 
 # Import LLM provider
 try:
@@ -22,21 +23,20 @@ except ImportError:
 
 
 class StageProcessor:
-    def __init__(self, edit_id: int, db):
+    def __init__(self, edit_id: int):
         self.edit_id = edit_id
-        self.db = db
         self.edit = None
         self.cached_image_bytes = None  # Cache for image bytes to avoid multiple S3 downloads
         
     def get_edit(self):
-        """Get edit details from database"""
+        """Get edit details from database using raw psycopg"""
         if not self.edit:
-            self.edit = crud.get_edit(self.db, self.edit_id)
+            self.edit = db_raw.get_edit_by_id(self.edit_id)
         return self.edit
     
     def update_stage(self, stage: str):
-        """Update processing stage in database"""
-        crud.update_edit_processing_stage(self.db, self.edit_id, stage)
+        """Update processing stage in database using raw psycopg"""
+        db_raw.update_edit_processing_stage(self.edit_id, stage)
         logger.info(f"STAGE UPDATED: {stage} for edit {self.edit_id}")
     
     def stage_enhance_prompt(self):
@@ -70,7 +70,7 @@ class StageProcessor:
                     logger.info(f"Enhanced prompt: '{enhanced_prompt}'")
                     
                     # Update database with enhanced prompt
-                    crud.update_edit_enhanced_prompt(self.db, self.edit_id, enhanced_prompt)
+                    db_raw.update_edit_enhanced_prompt(self.edit_id, enhanced_prompt)
                     logger.info(f"Enhanced prompt saved to database for edit {self.edit_id}")
                     
                     # Store image_bytes for reuse to avoid second S3 download
@@ -145,10 +145,9 @@ class StageProcessor:
         return edited_image_url
     
     def stage_complete(self, edited_image_url: str):
-        """Stage: Mark as completed"""
+        """Stage: Mark as completed using raw psycopg"""
         logger.info(f"STAGE: Completing edit {self.edit_id}")
-        crud.update_edit_with_result(self.db, self.edit_id, "completed", edited_image_url)
-        crud.update_edit_processing_stage(self.db, self.edit_id, "completed")
+        db_raw.update_edit_with_result(self.edit_id, "completed", edited_image_url)
         logger.info(f"TASK COMPLETED: Edit {self.edit_id} completed successfully")
 
 
@@ -198,8 +197,7 @@ def process_edit_with_stage_retries(edit_id: int):
     tracker = None
     try:
         # Initialize
-        db = database.get_db_with_retry(max_retries=3)
-        processor = StageProcessor(edit_id, db)
+        processor = StageProcessor(edit_id)
         edit = processor.get_edit()
         
         if not edit:
@@ -216,7 +214,7 @@ def process_edit_with_stage_retries(edit_id: int):
         
         # Initialize processing - Update status immediately
         tracker.start_stage("initialization")
-        crud.update_edit_status(db, edit_id, "processing")
+        db_raw.update_edit_status(edit_id, "processing")
         tracker.end_stage("initialization")
         
         # Stage 0: Enhance prompt (moved from API for instant response)
@@ -270,19 +268,14 @@ def process_edit_with_stage_retries(edit_id: int):
         
     except Exception as e:
         logger.info(f"TASK FAILED: Edit {edit_id} failed: {str(e)}")
-        if db:
-            try:
-                crud.update_edit_status(db, edit_id, "failed")
-                crud.update_edit_processing_stage(db, edit_id, "failed")
-                logger.info(f"STATUS UPDATED: Edit {edit_id} marked as failed")
-            except Exception as update_error:
-                logger.info(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
+        try:
+            db_raw.update_edit_status(edit_id, "failed")
+            db_raw.update_edit_processing_stage(edit_id, "failed")
+            logger.info(f"STATUS UPDATED: Edit {edit_id} marked as failed")
+        except Exception as update_error:
+            logger.info(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
         
         if tracker:
             tracker.finish_tracking(f"failed_{type(e).__name__}")
 
         raise e
-    
-    finally:
-        if db:
-            db.close()
