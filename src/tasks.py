@@ -1,6 +1,6 @@
 import asyncio
 from celery import Celery
-from . import flux_api, s3
+from . import crud, database, flux_api, s3, models
 from .flux_api import BFLServiceError
 from .task_stages import process_edit_with_stage_retries
 from .logger import logger
@@ -17,10 +17,9 @@ redis_prefix = f"{ENVIRONMENT}:"
 # Unified memory configuration for 2GB RAM, 2 vCPU Lightsail instances
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "5"))
 CELERY_MEMORY_LIMIT = os.environ.get("CELERY_WORKER_MEMORY_LIMIT", "1GB")
-CELERY_CONCURRENCY = int(os.environ.get("CELERY_CONCURRENCY", "1"))
 
 logger.info(f"Initializing Celery with environment: {ENVIRONMENT}, redis_prefix: {redis_prefix}")
-logger.info(f"Unified resource configuration - MAX_WORKERS: {MAX_WORKERS}, MEMORY_LIMIT: {CELERY_MEMORY_LIMIT}, CONCURRENCY: {CELERY_CONCURRENCY}")
+logger.info(f"Unified resource configuration - MAX_WORKERS: {MAX_WORKERS}, MEMORY_LIMIT: {CELERY_MEMORY_LIMIT}")
 
 # For rediss:// URLs, add the required SSL parameter that Celery expects
 if broker_url.startswith('rediss://'):
@@ -40,40 +39,7 @@ celery = Celery(
     broker_transport_options=broker_transport_options
 )
 
-# Configure Celery for 3 concurrent workers with optimized serialization
-celery.conf.update(
-    worker_concurrency=CELERY_CONCURRENCY,  # Use environment variable
-    worker_prefetch_multiplier=1,           # Process one task at a time per worker
-    task_acks_late=True,                   # Better error handling
-    worker_max_tasks_per_child=100,        # Recycle worker after 100 tasks to prevent memory leaks
-    
-    # Optimized serialization for better performance
-    task_serializer='json',                # JSON is faster than pickle
-    result_serializer='json',              # JSON results
-    accept_content=['json'],               # Only accept JSON
-    result_expires=3600,                   # Results expire after 1 hour
-    
-    # Performance optimizations
-    task_compression='gzip',               # Compress task data
-    result_compression='gzip',             # Compress results
-    task_ignore_result=False,              # We need results for polling
-    
-    # Connection optimization
-    broker_connection_retry_on_startup=True,
-    broker_connection_retry=True,
-    broker_connection_max_retries=10,
-)
-
-logger.info(f"Celery configured with concurrency: {CELERY_CONCURRENCY}, prefetch: 1, max_tasks_per_child: 100")
-
-@celery.task(
-    name='src.tasks.process_image_edit', 
-    soft_time_limit=600, 
-    time_limit=660,
-    serializer='json',
-    compression='gzip',
-    acks_late=True
-)
+@celery.task(name='src.tasks.process_image_edit', soft_time_limit=600, time_limit=660)
 def process_image_edit(edit_id: int):
     """
     Process image edit with stage-specific retries.

@@ -1,24 +1,29 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
 from typing import Optional
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from src import schemas, s3, tasks, db_raw, cache
+from src import models, schemas, database, s3, tasks, db_raw
+from src.database import engine
 
 import uuid
 import base64
 import os
 from src.logger import logger
 
+
+import os
+
+models.Base.metadata.create_all(bind=engine)
+
 # Rate limiting configuration from environment variables
 RATE_LIMIT_DAILY_IMAGES = os.environ.get("RATE_LIMIT_DAILY_IMAGES", "3")
 RATE_LIMIT_BURST_SECONDS = os.environ.get("RATE_LIMIT_BURST_SECONDS", "10")
 RATE_LIMIT_STATUS_CHECKS_PER_MINUTE = os.environ.get("RATE_LIMIT_STATUS_CHECKS_PER_MINUTE", "30")
-
-# Chain editing configuration
-MAX_CHAIN_LENGTH = int(os.environ.get("MAX_CHAIN_LENGTH", "5"))
 
 # Image type validation configuration
 UNSUPPORTED_IMAGE_TYPES = os.environ.get("UNSUPPORTED_IMAGE_TYPES", "heic,avif,gif").lower().split(",")
@@ -162,61 +167,47 @@ async def celery_health_check(request: Request):
 async def debug_database_schema(request: Request):
     """Debug endpoint to check database schema and table structure"""
     try:
-        with db_raw.get_connection() as conn:
-            with conn.cursor() as cur:
-                # Check current schema path
-                cur.execute("SHOW search_path")
-                schema_result = cur.fetchone()
-                current_schema = schema_result[0] if schema_result else "unknown"
-                
-                # Check if edits table exists and get its columns
-                cur.execute("""
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns 
-                    WHERE table_name = 'edits' 
-                    AND table_schema = ANY(current_schemas(false))
-                    ORDER BY ordinal_position
-                """)
-                table_check = cur.fetchall()
-                
-                # Check environment variable
-                environment = os.environ.get("ENVIRONMENT", "unknown")
-                
-            return {
-                "environment": environment,
-                "current_schema_path": current_schema,
-                "edits_table_columns": [
-                    {
-                        "column_name": row[0],
-                        "data_type": row[1], 
-                        "is_nullable": row[2],
-                        "column_default": row[3]
-                    } for row in table_check
-                ],
-                "has_processing_stage": any(row[0] == 'processing_stage' for row in table_check)
-            }
+        db = next(database.get_db())
+        
+        # Check current schema path
+        schema_result = db.execute(text("SHOW search_path")).fetchone()
+        current_schema = schema_result[0] if schema_result else "unknown"
+        
+        # Check if edits table exists and get its columns
+        table_check = db.execute(text("""
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns 
+            WHERE table_name = 'edits' 
+            AND table_schema = ANY(current_schemas(false))
+            ORDER BY ordinal_position
+        """)).fetchall()
+        
+        # Check environment variable
+        environment = os.environ.get("ENVIRONMENT", "unknown")
+        
+        return {
+            "environment": environment,
+            "current_schema_path": current_schema,
+            "edits_table_columns": [
+                {
+                    "column_name": row[0],
+                    "data_type": row[1], 
+                    "is_nullable": row[2],
+                    "column_default": row[3]
+                } for row in table_check
+            ],
+            "has_processing_stage": any(row[0] == 'processing_stage' for row in table_check)
+        }
     except Exception as e:
         return {"error": f"Database schema check failed: {str(e)}"}
-
-@app.get("/debug/cache-stats")
-@limiter.limit("5/minute")
-async def debug_cache_stats(request: Request):
-    """Debug endpoint to check cache statistics"""
-    return cache.get_cache_stats()
-
-@app.get("/debug/db-performance")
-@limiter.limit("3/minute")
-async def debug_database_performance(request: Request):
-    """Debug endpoint to check database performance and optimization suggestions"""
-    try:
-        return db_raw.get_database_performance_info()
-    except Exception as e:
-        return {"error": f"Database performance check failed: {str(e)}"}
+    finally:
+        if 'db' in locals():
+            db.close()
 
 @app.post("/edit-image/", response_model=schemas.EditCreateResponse)
 @limiter.limit(f"{RATE_LIMIT_DAILY_IMAGES}/day")  # Configurable daily limit per IP
 @limiter.limit(f"1/{RATE_LIMIT_BURST_SECONDS}seconds")  # Configurable burst protection per IP
-async def edit_image_endpoint(request: Request, edit_request: EditImageRequest):
+async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, db: Session = Depends(database.get_db)):
     # Validate follow-up editing if parent_edit_uuid is provided
     if edit_request.parent_edit_uuid:
         # Check if parent edit exists
@@ -229,10 +220,10 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest):
             raise HTTPException(status_code=400, detail=f"Parent edit is {parent_edit['status']}, cannot continue from incomplete edit")
         
         # Validate chain length
-        # Check chain length (configurable max edits)
+        # Check chain length (max 5 edits)
         chain_history = db_raw.get_edit_chain_history(edit_request.parent_edit_uuid)
-        if len(chain_history) >= MAX_CHAIN_LENGTH:
-            raise HTTPException(status_code=400, detail=f"Maximum chain length of {MAX_CHAIN_LENGTH} edits reached")
+        if len(chain_history) >= 5:
+            raise HTTPException(status_code=400, detail="Maximum chain length of 5 edits reached")
         
         logger.info(f"Starting follow-up edit (chain position {len(chain_history) + 1}) with prompt: '{edit_request.prompt}'")
         logger.info(f"Parent edit: {edit_request.parent_edit_uuid}")
@@ -298,13 +289,8 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest):
 
 @app.get("/edit/{edit_uuid}", response_model=schemas.EditStatusResponse)
 @limiter.limit(f"{RATE_LIMIT_STATUS_CHECKS_PER_MINUTE}/minute")  # Configurable status check limit
-def get_edit_status(request: Request, edit_uuid: str):
+def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
     from src.status_messages import get_status_message
-    
-    # Try to get from cache first (status checks are frequent)
-    cached_status = cache.get_cached_edit_status(edit_uuid)
-    if cached_status:
-        return cached_status
     
     db_edit = db_raw.get_edit_by_uuid(edit_uuid)
     if db_edit is None:
@@ -313,7 +299,7 @@ def get_edit_status(request: Request, edit_uuid: str):
     # Get user-friendly progress information
     progress_info = get_status_message(db_edit['status'], db_edit['processing_stage'])
     
-    response_data = {
+    return {
         "uuid": db_edit['uuid'],
         "status": db_edit['status'],
         "processing_stage": db_edit['processing_stage'],
@@ -325,15 +311,10 @@ def get_edit_status(request: Request, edit_uuid: str):
         "prompt": db_edit['prompt'],
         "created_at": db_edit['created_at']
     }
-    
-    # Cache the response (short TTL since status changes frequently)
-    cache.cache_edit_status(edit_uuid, response_data)
-    
-    return response_data
 
 @app.post("/feedback/", response_model=schemas.FeedbackResponse)
 @limiter.limit("5/minute")  # Limit feedback submissions to prevent spam
-async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate):
+async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate, db: Session = Depends(database.get_db)):
     """Submit feedback for an edit result"""
     
     # Get user IP for analytics
@@ -372,18 +353,13 @@ async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate):
     return {
         "success": True,
         "message": "Thank you for your feedback!",
-        "feedback_id": feedback.edit_uuid  # Use edit_uuid as identifier since we don't have auto-increment ID
+        "feedback_id": db_feedback.id
     }
 
 @app.get("/feedback/{edit_uuid}", response_model=schemas.Feedback)
 @limiter.limit("10/minute")  # Allow checking feedback status
-async def get_feedback_for_edit(request: Request, edit_uuid: str):
+async def get_feedback_for_edit(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
     """Get feedback for a specific edit (optional endpoint for checking if feedback exists)"""
-    
-    # Try to get from cache first (feedback rarely changes)
-    cached_feedback = cache.get_cached_edit_feedback(edit_uuid)
-    if cached_feedback:
-        return cached_feedback
     
     # Validate that the edit exists
     edit = db_raw.get_edit_by_uuid(edit_uuid)
@@ -395,24 +371,12 @@ async def get_feedback_for_edit(request: Request, edit_uuid: str):
     if not feedback:
         raise HTTPException(status_code=404, detail="No feedback found for this edit")
     
-    # Cache the feedback (longer TTL since feedback doesn't change)
-    cache.cache_edit_feedback(edit_uuid, feedback)
-    
     return feedback
 
 @app.get("/chain/{edit_uuid}")
 @limiter.limit("10/minute")  # Allow checking chain history
-async def get_edit_chain_history(request: Request, edit_uuid: str):
+async def get_edit_chain_history(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
     """Get the complete chain history for an edit"""
-    
-    # Try to get from cache first
-    cached_chain = cache.get_cached_chain_history(edit_uuid)
-    if cached_chain:
-        return {
-            "edit_uuid": edit_uuid,
-            "chain_length": len(cached_chain),
-            "chain_history": cached_chain
-        }
     
     # Validate that the edit exists
     edit = db_raw.get_edit_by_uuid(edit_uuid)
@@ -421,9 +385,6 @@ async def get_edit_chain_history(request: Request, edit_uuid: str):
     
     # Get chain history
     chain_history = db_raw.get_edit_chain_history(edit_uuid)
-    
-    # Cache the chain history
-    cache.cache_chain_history(edit_uuid, chain_history)
     
     return {
         "edit_uuid": edit_uuid,
