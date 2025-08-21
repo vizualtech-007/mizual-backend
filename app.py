@@ -211,20 +211,21 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     # Validate follow-up editing if parent_edit_uuid is provided
     if edit_request.parent_edit_uuid:
         # Check if parent edit exists
-        parent_edit = crud.get_edit_by_uuid(db, edit_request.parent_edit_uuid)
+        parent_edit = db_raw.get_edit_by_uuid(edit_request.parent_edit_uuid)
         if not parent_edit:
             raise HTTPException(status_code=404, detail="Parent edit not found")
         
         # Check if parent edit is completed
-        if parent_edit.status != "completed":
-            raise HTTPException(status_code=400, detail=f"Parent edit is {parent_edit.status}, cannot continue from incomplete edit")
+        if parent_edit['status'] != "completed":
+            raise HTTPException(status_code=400, detail=f"Parent edit is {parent_edit['status']}, cannot continue from incomplete edit")
         
         # Validate chain length
-        chain_length = crud.validate_chain_length(db, edit_request.parent_edit_uuid)
-        if chain_length == -1:
+        # Check chain length (max 5 edits)
+        chain_history = db_raw.get_edit_chain_history(edit_request.parent_edit_uuid)
+        if len(chain_history) >= 5:
             raise HTTPException(status_code=400, detail="Maximum chain length of 5 edits reached")
         
-        logger.info(f"Starting follow-up edit (chain position {chain_length + 1}) with prompt: '{edit_request.prompt}'")
+        logger.info(f"Starting follow-up edit (chain position {len(chain_history) + 1}) with prompt: '{edit_request.prompt}'")
         logger.info(f"Parent edit: {edit_request.parent_edit_uuid}")
     else:
         logger.info(f"Starting new edit with prompt: '{edit_request.prompt}'")
@@ -260,8 +261,7 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     logger.info("Prompt enhancement moved to Celery task for faster API response")
 
     # Create database record with original prompt only (enhanced_prompt will be added by Celery)
-    edit = crud.create_edit(
-        db=db,
+    edit = db_raw.create_edit(
         prompt=original_prompt,
         enhanced_prompt=None,  # Will be set by Celery task
         original_image_url=original_image_url,
@@ -269,30 +269,30 @@ async def edit_image_endpoint(request: Request, edit_request: EditImageRequest, 
     )
     
     # Update status immediately to show progress to user - INSTANT FEEDBACK
-    crud.update_edit_status(db, edit.id, "processing")
-    logger.info(f"API: Setting processing stage to 'enhancing_prompt' for edit {edit.id}")
-    crud.update_edit_processing_stage(db, edit.id, "enhancing_prompt")  # Show enhancing_prompt immediately
-    logger.info(f"API: Stage updated successfully for edit {edit.id}")
+    db_raw.update_edit_status(edit['id'], "processing")
+    logger.info(f"API: Setting processing stage to 'enhancing_prompt' for edit {edit['id']}")
+    db_raw.update_edit_processing_stage(edit['id'], "enhancing_prompt")  # Show enhancing_prompt immediately
+    logger.info(f"API: Stage updated successfully for edit {edit['id']}")
     
     # Verify the update worked
-    updated_edit = crud.get_edit(db, edit.id)
-    logger.info(f"API: Verified stage is now '{updated_edit.processing_stage}' for edit {edit.id}")
+    updated_edit = db_raw.get_edit_by_id(edit['id'])
+    logger.info(f"API: Verified stage is now '{updated_edit['processing_stage']}' for edit {edit['id']}")
     
     # Process the image edit asynchronously with the final prompt
-    tasks.celery.send_task('src.tasks.process_image_edit', args=[edit.id])
+    tasks.celery.send_task('mizual.image_edit_processor', args=[edit['id']])
     
-    logger.info(f"Edit request queued for processing with UUID: {edit.uuid}")
+    logger.info(f"Edit request queued for processing with UUID: {edit['uuid']}")
 
-    polling_url = str(request.url_for('get_edit_status', edit_uuid=edit.uuid))
+    polling_url = str(request.url_for('get_edit_status', edit_uuid=edit['uuid']))
 
-    return {"edit_id": edit.uuid, "polling_url": polling_url}
+    return {"edit_id": edit['uuid'], "polling_url": polling_url}
 
 @app.get("/edit/{edit_uuid}", response_model=schemas.EditStatusResponse)
 @limiter.limit(f"{RATE_LIMIT_STATUS_CHECKS_PER_MINUTE}/minute")  # Configurable status check limit
 def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(database.get_db)):
     from src.status_messages import get_status_message
     
-    db_edit = crud.get_edit_by_uuid(db, edit_uuid=edit_uuid)
+    db_edit = db_raw.get_edit_by_uuid(edit_uuid)
     if db_edit is None:
         raise HTTPException(status_code=404, detail="Edit not found")
     
@@ -300,7 +300,7 @@ def get_edit_status(request: Request, edit_uuid: str, db: Session = Depends(data
     progress_info = get_status_message(db_edit.status, db_edit.processing_stage)
     
     return {
-        "uuid": db_edit.uuid,
+        "uuid": db_edit['uuid'],
         "status": db_edit.status,
         "processing_stage": db_edit.processing_stage,
         "message": progress_info["message"],
@@ -321,23 +321,29 @@ async def submit_feedback(request: Request, feedback: schemas.FeedbackCreate, db
     user_ip = get_remote_address(request)
     
     # Validate that the edit exists
-    edit = crud.get_edit_by_uuid(db, feedback.edit_uuid)
+    edit = db_raw.get_edit_by_uuid(feedback.edit_uuid)
     if not edit:
         raise HTTPException(status_code=404, detail="Edit not found")
     
     # Check if edit is completed (can only give feedback on completed edits)
-    if edit.status != "completed":
+    if edit['status'] != "completed":
         raise HTTPException(status_code=400, detail="Can only provide feedback for completed edits")
     
     # Check if feedback already exists for this edit
-    if crud.feedback_exists_for_edit(db, feedback.edit_uuid):
+    existing_feedback = db_raw.get_edit_feedback(feedback.edit_uuid)
+    if existing_feedback:
         raise HTTPException(status_code=409, detail="Feedback already submitted for this edit")
     
     # Create the feedback
-    db_feedback = crud.create_feedback(db=db, feedback=feedback, user_ip=user_ip)
-    
-    if not db_feedback:
+    success = db_raw.create_edit_feedback(
+        edit_uuid=feedback.edit_uuid,
+        rating=feedback.rating,
+        feedback_text=feedback.feedback_text,
+        user_ip=user_ip
+    )
+    if not success:
         raise HTTPException(status_code=500, detail="Failed to create feedback")
+    
     
     rating_text = "thumbs up" if feedback.rating == 1 else "thumbs down"
     logger.info(f"Feedback submitted for edit {feedback.edit_uuid}: {rating_text} ({feedback.rating})")
@@ -356,12 +362,12 @@ async def get_feedback_for_edit(request: Request, edit_uuid: str, db: Session = 
     """Get feedback for a specific edit (optional endpoint for checking if feedback exists)"""
     
     # Validate that the edit exists
-    edit = crud.get_edit_by_uuid(db, edit_uuid)
+    edit = db_raw.get_edit_by_uuid(edit_uuid)
     if not edit:
         raise HTTPException(status_code=404, detail="Edit not found")
     
     # Get feedback for this edit
-    feedback = crud.get_feedback_by_edit_uuid(db, edit_uuid)
+    feedback = db_raw.get_edit_feedback(edit_uuid)
     if not feedback:
         raise HTTPException(status_code=404, detail="No feedback found for this edit")
     
@@ -373,12 +379,12 @@ async def get_edit_chain_history(request: Request, edit_uuid: str, db: Session =
     """Get the complete chain history for an edit"""
     
     # Validate that the edit exists
-    edit = crud.get_edit_by_uuid(db, edit_uuid)
+    edit = db_raw.get_edit_by_uuid(edit_uuid)
     if not edit:
         raise HTTPException(status_code=404, detail="Edit not found")
     
     # Get chain history
-    chain_history = crud.get_edit_chain_history(db, edit_uuid)
+    chain_history = db_raw.get_edit_chain_history(edit_uuid)
     
     return {
         "edit_uuid": edit_uuid,
