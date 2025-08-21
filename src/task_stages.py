@@ -7,22 +7,6 @@ import asyncio
 import httpx
 from . import flux_api, s3, cache
 import gc  # Garbage collection for memory optimization
-
-# Shared HTTP client with connection pooling
-_http_client = None
-
-def get_http_client():
-    """Get or create shared HTTP client with connection pooling"""
-    global _http_client
-    if _http_client is None:
-        timeout_config = httpx.Timeout(10.0, connect=3.0)
-        limits = httpx.Limits(max_keepalive_connections=3, max_connections=6)
-        _http_client = httpx.Client(
-            timeout=timeout_config,
-            limits=limits
-            # http2=True requires httpx[http2] package
-        )
-    return _http_client
 from .flux_api import BFLServiceError
 from .performance_tracker import get_performance_tracker, finish_performance_tracking
 import os
@@ -80,10 +64,11 @@ class StageProcessor:
                 if llm_provider:
                     # Fetch image for prompt enhancement - Optimized with connection pooling
                     logger.info(f"Fetching image for prompt enhancement from: {edit['original_image_url']}")
-                    client = get_http_client()
-                    response = client.get(edit['original_image_url'])
-                    response.raise_for_status()
-                    image_bytes = response.content
+                    # Use httpx directly without global client to avoid issues
+                    with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
+                        response = client.get(edit['original_image_url'])
+                        response.raise_for_status()
+                        image_bytes = response.content
                     
                     enhanced_prompt = llm_provider.enhance_prompt(original_prompt, image_bytes)
                     logger.info("Gemini enhancement completed")
@@ -128,11 +113,11 @@ class StageProcessor:
         image_url = edit['original_image_url']
         logger.info(f"Fetching image from: {image_url}")
         
-        # Optimized HTTP request with connection pooling
-        client = get_http_client()
-        response = client.get(image_url)
-        response.raise_for_status()
-        image_bytes = response.content
+        # Use httpx directly without global client to avoid issues
+        with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
+            response = client.get(image_url)
+            response.raise_for_status()
+            image_bytes = response.content
             
         logger.info(f"Successfully fetched original image, size: {len(image_bytes)} bytes")
         
