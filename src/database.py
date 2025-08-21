@@ -15,7 +15,8 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
 schema_name = "preview" if ENVIRONMENT == "preview" else "public"
 connect_args = {
     "sslmode": "require",
-    "options": f"-csearch_path={schema_name},public"
+    "options": f"-csearch_path={schema_name},public",
+    "prepare_threshold": 0
 }
 
 # Optimized connection pool configuration for performance
