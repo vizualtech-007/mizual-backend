@@ -76,10 +76,10 @@ You are a highly analytical visual expert. Analyze the image and user's request,
 **4. Create JSON Output:**
     Create your complete plan in a single, valid JSON object with this structure:
     {{
-      "subject_to_preserve": {{{{ 
-          "component_parts": ["list", "of", "parts"], 
+      "subject_to_preserve": {{
+          "component_parts": ["list", "of", "parts"],
           "description": "The highly detailed description of the 'Complete Subject', based ONLY on the visual evidence in the image."
-      }}}}, 
+      }},
       "background_edit_instruction": "The instruction for what to do with the background.",
       "detail_edit_instructions": [
         "A list of instructions for small edits on the subject."
@@ -88,7 +88,7 @@ You are a highly analytical visual expert. Analyze the image and user's request,
 
 ## STEP 2: PLAN VALIDATION
 Now switch roles. You are a quality assurance expert with a keen eye. Review the JSON plan you just created and compare the `description` inside the `subject_to_preserve` key against the image.
-Does the description accurately match the main main subject in the image, including its parts and their proportions?
+Does the description accurately match the main subject in the image, including its parts and their proportions?
 Provide a validation result: YES or NO.
 
 ## STEP 3: PROMPT ARCHITECTURE
@@ -141,11 +141,11 @@ Remember: Complete ALL three steps in sequence. Do not skip any step. The final 
                 system_prompt,
                 {"mime_type": "image/jpeg", "data": img_bytes}
             ]
-            generation_config = {{
-                "temperature": 0.1,
-                "top_p": 0.95,
-                "max_output_tokens": 2048,
-            }}
+            generation_config = {
+                "temperature": 0.1,  # Lower temperature for more deterministic output
+                "top_p": 0.95,  # Slightly reduced to balance speed and quality
+                "max_output_tokens": 2048,  # Enough for detailed response
+            }
             response = self.model.generate_content(
                 prompt_parts,
                 generation_config=generation_config,
