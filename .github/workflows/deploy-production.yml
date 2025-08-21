@@ -67,8 +67,31 @@ jobs:
             cd /opt/mizual
             git clone https://github.com/vizualtech-007/mizual-backend.git .
             git checkout ${{ github.ref_name }}
+      
+      - name: Copy .env file to server
+        uses: appleboy/scp-action@v0.1.5
+        with:
+          host: ${{ steps.env.outputs.TARGET_HOST }}
+          username: ubuntu
+          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
+          source: ".env"
+          target: "/opt/mizual/"
+
+      - name: Start services
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ steps.env.outputs.TARGET_HOST }}
+          username: ubuntu
+          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
+          script: |
+            cd /opt/mizual
             
-            # Deploy with specified environment
+            # Verify .env file exists
+            if [ ! -f .env ]; then
+              echo "Error: .env file not found!"
+              exit 1
+            fi
+            
             echo "Starting deployment with Docker Compose..."
             
             # Check which docker compose command is available
@@ -83,15 +106,6 @@ jobs:
             fi
             
             echo "Deployment completed"
-      
-      - name: Copy .env file to server
-        uses: appleboy/scp-action@v0.1.5
-        with:
-          host: ${{ steps.env.outputs.TARGET_HOST }}
-          username: ubuntu
-          key: ${{ github.ref_name == 'main' && secrets.LIGHTSAIL_PROD_SSH_KEY || secrets.LIGHTSAIL_DEV_SSH_KEY }}
-          source: ".env"
-          target: "/opt/mizual/"
             
       - name: Health Check
         uses: appleboy/ssh-action@v0.1.5
