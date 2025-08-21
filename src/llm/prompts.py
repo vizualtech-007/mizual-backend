@@ -9,7 +9,8 @@ def get_prompt_template() -> str:
     Returns:
         Formatted prompt template string
     """
-    # Returns the same detailed prompt for all image types as requested.
+    # This template uses doubled curly braces {{ and }} to escape the JSON structure for the .format() method,
+    # while using single braces {user_prompt} for the actual placeholder.
     return f"""You are a multi-role AI assistant that will perform a complete image editing workflow analysis in sequential steps. You must complete ALL steps in order and provide your final output.
 
 ## STEP 1: WORKFLOW PLANNING
@@ -35,16 +36,16 @@ You are a highly analytical visual expert. Analyze the image and user's request,
 
 **4. Create JSON Output:**
     Create your complete plan in a single, valid JSON object with this structure:
-    {{
-      \"subject_to_preserve\": {{
-          \"component_parts\": [\"list\", \"of\", \"parts\"],
+    {{{{
+      \"subject_to_preserve\": {{{{ 
+          \"component_parts\": [\"list\", \"of\", \"parts\"], 
           \"description\": \"The highly detailed description of the 'Complete Subject', based ONLY on the visual evidence in the image.\"
-      }},
+      }}}}, 
       \"background_edit_instruction\": \"The instruction for what to do with the background.\",
       \"detail_edit_instructions\": [
         \"A list of instructions for small edits on the subject.\"
       ]
-    }}
+    }}}} 
 
 ## STEP 2: PLAN VALIDATION
 Now switch roles. You are a quality assurance expert with a keen eye. Review the JSON plan you just created and compare the `description` inside the `subject_to_preserve` key against the image.
@@ -57,11 +58,11 @@ You are now an expert prompt engineer. Based on your validation result from Step
 **Follow these rules:**
 
 **IF the validation status is YES (PASSED):**
-*   Construct a \"High-Fidelity\" prompt using the detailed plan.
+*   Construct a "High-Fidelity" prompt using the detailed plan.
 *   **Format:**
-    Line 1: \"High-fidelity photographic edit of the provided image.\"
-    Line 2: \"Subject to Preserve: \" followed by the component_parts formatted exactly as a Python list (e.g., ['item1', 'item2', 'item3'] with square brackets and quotes)
-    Line 3: \"Edits to perform:\"
+    Line 1: "High-fidelity photographic edit of the provided image."
+    Line 2: "Subject to Preserve: " followed by the component_parts formatted exactly as a Python list (e.g., ['item1', 'item2', 'item3'] with square brackets and quotes)
+    Line 3: "Edits to perform:"
     Following Lines: A numbered list of all instructions from `background_edit_instruction` and `detail_edit_instructions`.
     
     **Example output format:**
@@ -73,13 +74,13 @@ You are now an expert prompt engineer. Based on your validation result from Step
 
 **IF the validation status is NO (FAILED):**
 *   The planner's analysis is unreliable. **IGNORE the `subject_to_preserve` description in the JSON plan.**
-*   Construct a \"Fallback\" prompt using ONLY the user's original request.
+*   Construct a "Fallback" prompt using ONLY the user's original request.
 *   **Format:**
-    Line 1: \"High-fidelity photographic edit of the provided image.\"
-    Line 2: \"Edits to perform based on the user's request:\"
+    Line 1: "High-fidelity photographic edit of the provided image."
+    Line 2: "Edits to perform based on the user's request:"
     Following Lines: A numbered list directly translating the user's original request into actions.
 
-**User's Original Request:** \"{{user_prompt}}\" 
+**User's Original Request:** "{user_prompt}" 
 
 ## FINAL OUTPUT FORMAT
 You must structure your complete response EXACTLY as follows:
