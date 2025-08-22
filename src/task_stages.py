@@ -1,0 +1,323 @@
+"""
+Stage-specific retry logic for image processing tasks.
+Each stage can be retried independently without restarting the entire process.
+"""
+
+import asyncio
+import httpx
+from . import flux_api, s3, cache
+import gc  # Garbage collection for memory optimization
+from .flux_api import BFLServiceError
+from .performance_tracker import get_performance_tracker, finish_performance_tracking
+import os
+from .performance_tracker import PerformanceTracker
+from datetime import timezone
+from .logger import logger
+from . import db_raw
+
+# Import LLM provider
+try:
+    from .llm import get_provider
+    LLM_AVAILABLE = True
+except ImportError:
+    LLM_AVAILABLE = False
+
+
+class StageProcessor:
+    def __init__(self, edit_id: int):
+        self.edit_id = edit_id
+        self.edit = None
+        self.cached_image_bytes = None  # Cache for image bytes to avoid multiple S3 downloads
+        
+    def get_edit(self):
+        """Get edit details from database using raw psycopg"""
+        if not self.edit:
+            self.edit = db_raw.get_edit_by_id(self.edit_id)
+        return self.edit
+    
+    def update_stage(self, stage: str):
+        """Update processing stage in database using raw psycopg"""
+        db_raw.update_edit_processing_stage(self.edit_id, stage)
+        
+        # Invalidate status cache when stage changes
+        edit = self.get_edit()
+        if edit:
+            cache.invalidate_edit_status(edit['uuid'])
+        
+        logger.info(f"STAGE UPDATED: {stage} for edit {self.edit_id}")
+    
+    def stage_enhance_prompt(self):
+        """Stage: Enhance prompt with LLM - Optimized to skip redundant stage update"""
+        logger.info(f"STAGE: Enhancing prompt for edit {self.edit_id} (API already set stage)")
+        # Verify current stage before starting
+        edit = self.get_edit()
+        logger.info(f"CELERY: Current stage when starting prompt enhancement: '{edit['processing_stage']}'")
+        
+        edit = self.get_edit()
+        original_prompt = edit['prompt']
+        enhanced_prompt = None
+        
+        if LLM_AVAILABLE and os.environ.get("ENABLE_PROMPT_ENHANCEMENT", "true").lower() in ["true", "1", "yes"]:
+            try:
+                logger.info("Attempting prompt enhancement with LLM")
+                llm_provider = get_provider()
+                if llm_provider:
+                    # Fetch image for prompt enhancement - Optimized with connection pooling
+                    logger.info(f"Fetching image for prompt enhancement from: {edit['original_image_url']}")
+                    # Use httpx directly without global client to avoid issues
+                    with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
+                        response = client.get(edit['original_image_url'])
+                        response.raise_for_status()
+                        image_bytes = response.content
+                    
+                    enhanced_prompt = llm_provider.enhance_prompt(original_prompt, image_bytes)
+                    logger.info("Gemini enhancement completed")
+                    logger.info(f"Original prompt: '{original_prompt}'")
+                    logger.info(f"Enhanced prompt: '{enhanced_prompt}'")
+                    
+                    # Update database with enhanced prompt
+                    db_raw.update_edit_enhanced_prompt(self.edit_id, enhanced_prompt)
+                    logger.info(f"Enhanced prompt saved to database for edit {self.edit_id}")
+                    
+                    # Store image_bytes for reuse to avoid second S3 download
+                    self.cached_image_bytes = image_bytes
+                    logger.info(f"Cached image bytes for reuse (size: {len(image_bytes)} bytes)")
+                    
+                    # Force garbage collection to free memory from image processing
+                    gc.collect()
+                    
+            except Exception as e:
+                logger.info(f"LLM enhancement failed: {e}")
+                logger.info("Falling back to original prompt")
+                enhanced_prompt = None
+        
+        if enhanced_prompt:
+            logger.info(f"Using enhanced prompt for BFL")
+            return enhanced_prompt
+        else:
+            logger.info(f"Using original prompt for BFL")
+            return original_prompt
+    
+    def stage_fetch_image(self):
+        """Stage: Fetch original image from S3 - Optimized with caching"""
+        logger.info(f"STAGE: Fetching original image for edit {self.edit_id}")
+        self.update_stage("fetching_original_image")
+        
+        # Check if we already have cached image bytes from prompt enhancement
+        if hasattr(self, 'cached_image_bytes') and self.cached_image_bytes:
+            logger.info(f"Using cached image bytes (size: {len(self.cached_image_bytes)} bytes) - SKIPPING S3 DOWNLOAD")
+            return self.cached_image_bytes
+        
+        # If not cached, download from S3
+        edit = self.get_edit()
+        image_url = edit['original_image_url']
+        logger.info(f"Fetching image from: {image_url}")
+        
+        # Use httpx directly without global client to avoid issues
+        with httpx.Client(timeout=httpx.Timeout(10.0)) as client:
+            response = client.get(image_url)
+            response.raise_for_status()
+            image_bytes = response.content
+            
+        logger.info(f"Successfully fetched original image, size: {len(image_bytes)} bytes")
+        
+        # Cache the image for reuse in later stages
+        self.cached_image_bytes = image_bytes
+        
+        return image_bytes
+    
+    def stage_process_with_ai(self, image_bytes: bytes, prompt: str):
+        """Stage: Process image with BFL AI - NO RETRIES"""
+        logger.info(f"STAGE: Processing with AI for edit {self.edit_id}")
+        self.update_stage("connecting_to_ai_service")
+        
+        logger.info(f"Calling BFL API for edit {self.edit_id}")
+        self.update_stage("processing_with_ai")
+        
+        try:
+            edited_image_bytes = asyncio.run(flux_api.edit_image_with_flux(image_bytes, prompt))
+            logger.info(f"BFL API returned edited image, size: {len(edited_image_bytes)} bytes")
+            
+            # Free original image from memory after processing
+            if hasattr(self, 'cached_image_bytes'):
+                self.cached_image_bytes = None
+            del image_bytes
+            gc.collect()  # Force garbage collection
+            
+            return edited_image_bytes
+        except Exception as e:
+            logger.info(f"BFL API ERROR: {str(e)} - NO RETRIES")
+            raise e
+    
+    def stage_upload_result(self, edited_image_bytes: bytes):
+        """Stage: Upload result to S3"""
+        logger.info(f"STAGE: Uploading result for edit {self.edit_id}")
+        self.update_stage("preparing_result")
+        
+        edit = self.get_edit()
+        edited_file_name = f"edited-{edit['uuid']}.png"
+        
+        self.update_stage("uploading_result")
+        edited_image_url = s3.upload_file_to_s3(edited_image_bytes, edited_file_name)
+        logger.info(f"Uploaded edited image to: {edited_image_url}")
+        
+        # Free edited image from memory after upload
+        del edited_image_bytes
+        gc.collect()  # Force garbage collection
+        
+        return edited_image_url
+    
+    def stage_complete(self, edited_image_url: str):
+        """Stage: Mark as completed using raw psycopg"""
+        logger.info(f"STAGE: Completing edit {self.edit_id}")
+        db_raw.update_edit_with_result(self.edit_id, "completed", edited_image_url)
+        
+        # Invalidate caches when edit is completed
+        edit = self.get_edit()
+        if edit:
+            cache.invalidate_edit_status(edit['uuid'])
+        
+        logger.info(f"TASK COMPLETED: Edit {self.edit_id} completed successfully")
+
+
+def retry_stage_with_backoff(stage_func, stage_name: str, max_retries: int = 3, base_delay: int = 10, allow_retries: bool = True):
+    """
+    Optimized retry with faster base delays and exponential backoff.
+    Only retries the failed stage, not the entire process.
+    Some stages (like AI processing) don't retry on failure.
+    """
+    if not allow_retries:
+        # No retries allowed - fail immediately on any error
+        try:
+            logger.info(f"STAGE ATTEMPT: {stage_name} (no retries allowed)")
+            return stage_func()
+        except Exception as e:
+            logger.info(f"STAGE FAILED: {stage_name} - {str(e)} (no retries)")
+            raise e
+    
+    # Optimized retry logic with faster delays
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"STAGE ATTEMPT: {stage_name} (attempt {attempt + 1}/{max_retries})")
+            return stage_func()
+        except BFLServiceError as e:
+            if not getattr(e, 'is_temporary', False) or attempt == max_retries - 1:
+                logger.info(f"STAGE FAILED: {stage_name} - {str(e)}")
+                raise e
+            
+            # Faster exponential backoff: 10s, 20s, 40s instead of 30s, 60s, 120s
+            delay = base_delay * (2 ** attempt)
+            logger.info(f"STAGE RETRY: {stage_name} failed, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+            import time
+            time.sleep(delay)
+        except Exception as e:
+            logger.info(f"STAGE FAILED: {stage_name} - Unexpected error: {str(e)}")
+            raise e
+    
+    raise Exception(f"Stage {stage_name} failed after {max_retries} attempts")
+
+
+def process_edit_with_stage_retries(edit_id: int):
+    """
+    Process edit with stage-specific retries.
+    Each stage can be retried independently.
+    """
+    db = None
+    tracker = None
+    try:
+        # Initialize
+        processor = StageProcessor(edit_id)
+        edit = processor.get_edit()
+        
+        if not edit:
+            logger.info(f"TASK ERROR: Edit {edit_id} not found in database")
+            return
+
+        tracker = PerformanceTracker(edit['id'], edit['uuid'])
+        # Set start time to when the request was created for end-to-end measurement
+        tracker.start_time = edit['created_at'].replace(tzinfo=timezone.utc).timestamp()
+        
+        logger.info(f"TASK PROCESSING: Edit {edit_id} with UUID {edit['uuid']}")
+        logger.info(f"Original prompt: '{edit['prompt']}'")
+        logger.info(f"Enhanced prompt: '{edit['enhanced_prompt']}'")
+        
+        # Initialize processing - Update status immediately
+        tracker.start_stage("initialization")
+        db_raw.update_edit_status(edit_id, "processing")
+        
+        # Invalidate status cache when processing starts
+        cache.invalidate_edit_status(edit['uuid'])
+        
+        tracker.end_stage("initialization")
+        
+        # Stage 0: Enhance prompt (moved from API for instant response)
+        tracker.start_stage("prompt_enhancement")
+        prompt_to_use = processor.stage_enhance_prompt()
+        tracker.end_stage("prompt_enhancement")
+        
+        # Continue with processing stages
+        processor.update_stage("initializing_processing")
+        processor.update_stage("preparing_image_data")
+        
+        logger.info(f"Using prompt for BFL API: '{prompt_to_use}'")
+        
+        # Stage 1: Fetch image (with retries)
+        tracker.start_stage("fetch_image")
+        image_bytes = retry_stage_with_backoff(
+            lambda: processor.stage_fetch_image(),
+            "fetch_image",
+            max_retries=2,  # Reduced retries for faster failure
+            base_delay=5    # Faster initial delay
+        )
+        tracker.end_stage("fetch_image")
+        
+        # Stage 2: Process with AI (NO RETRIES - fail immediately on BFL/Gemini errors)
+        tracker.start_stage("ai_processing")
+        edited_image_bytes = retry_stage_with_backoff(
+            lambda: processor.stage_process_with_ai(image_bytes, prompt_to_use),
+            "process_with_ai",
+            max_retries=1,
+            base_delay=0,
+            allow_retries=False
+        )
+        tracker.end_stage("ai_processing")
+        
+        # Stage 3: Upload result (with retries)
+        tracker.start_stage("upload_result")
+        edited_image_url = retry_stage_with_backoff(
+            lambda: processor.stage_upload_result(edited_image_bytes),
+            "upload_result",
+            max_retries=2,  # Reduced retries for faster failure
+            base_delay=5    # Faster initial delay
+        )
+        tracker.end_stage("upload_result")
+        
+        # Stage 4: Complete
+        tracker.start_stage("finalization")
+        processor.stage_complete(edited_image_url)
+        tracker.end_stage("finalization")
+
+        tracker.finish_tracking("completed")
+        
+    except Exception as e:
+        logger.info(f"TASK FAILED: Edit {edit_id} failed: {str(e)}")
+        try:
+            db_raw.update_edit_status(edit_id, "failed")
+            db_raw.update_edit_processing_stage(edit_id, "failed")
+            
+            # Invalidate status cache when failed
+            try:
+                edit_for_cache = db_raw.get_edit_by_id(edit_id)
+                if edit_for_cache:
+                    cache.invalidate_edit_status(edit_for_cache['uuid'])
+            except Exception:
+                pass  # Don't fail on cache invalidation
+            
+            logger.info(f"STATUS UPDATED: Edit {edit_id} marked as failed")
+        except Exception as update_error:
+            logger.info(f"CRITICAL ERROR: Could not update status for edit {edit_id}: {update_error}")
+        
+        if tracker:
+            tracker.finish_tracking(f"failed_{type(e).__name__}")
+
+        raise e
