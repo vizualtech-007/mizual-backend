@@ -1,0 +1,67 @@
+# EXTREME optimization - Target: <200MB
+# Replaces heavy AWS/Google SDKs with direct HTTP calls
+
+FROM python:3.11.9-alpine AS builder
+WORKDIR /build
+
+# Minimal build dependencies
+RUN apk add --no-cache --virtual .build-deps \
+    gcc \
+    musl-dev \
+    libffi-dev \
+    vips-dev \
+    pkgconfig
+
+# Ultra-minimal requirements (NO google-generativeai, NO boto3)
+RUN echo "fastapi==0.111.0" > requirements-extreme.txt && \
+    echo "uvicorn==0.29.0" >> requirements-extreme.txt && \
+    echo "python-multipart==0.0.9" >> requirements-extreme.txt && \
+    echo "psycopg[binary]==3.2.9" >> requirements-extreme.txt && \
+    echo "httpx==0.27.0" >> requirements-extreme.txt && \
+    echo "redis==5.0.4" >> requirements-extreme.txt && \
+    echo "celery==5.4.0" >> requirements-extreme.txt && \
+    echo "slowapi==0.1.9" >> requirements-extreme.txt && \
+    echo "python-dotenv==1.0.1" >> requirements-extreme.txt && \
+    echo "psutil==5.9.8" >> requirements-extreme.txt && \
+    echo "pyvips==2.2.3" >> requirements-extreme.txt
+
+# Install ultra-minimal packages (saves 128MB!)
+RUN pip install --no-cache-dir --prefix=/install -r requirements-extreme.txt
+
+# Aggressive cleanup
+RUN find /install -name "*.pyc" -delete && \
+    find /install -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find /install -name "*.pyo" -delete && \
+    find /install -name "tests" -type d -exec rm -rf {} + 2>/dev/null || true && \
+    find /install -name "test" -type d -exec rm -rf {} + 2>/dev/null || true
+
+# Stage 2: Minimal runtime
+FROM python:3.11.9-alpine AS extreme
+
+WORKDIR /code
+
+# Minimal runtime deps
+RUN apk add --no-cache \
+    vips \
+    curl \
+    libpq && \
+    rm -rf /var/cache/apk/*
+
+# Copy packages
+COPY --from=builder /install /usr/local
+
+# Copy app code
+COPY . /code
+
+# Create user
+RUN adduser -D -s /bin/sh mizual && \
+    chown -R mizual:mizual /code
+
+USER mizual
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=2 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

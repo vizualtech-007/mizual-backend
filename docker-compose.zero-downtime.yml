@@ -1,0 +1,177 @@
+version: '3.8'
+
+services:
+  # Docker Registry for storing images locally
+  registry:
+    image: registry:2
+    container_name: mizual-registry
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5000:5000"  # Only accessible from localhost
+    volumes:
+      - ./registry-data:/var/lib/registry
+    environment:
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+      REGISTRY_HTTP_SECRET: ${REGISTRY_SECRET:-defaultsecret}  # Change this in production
+    networks:
+      - mizual-network
+    deploy:
+      resources:
+        limits:
+          memory: 20M
+        reservations:
+          memory: 10M
+
+  # Watchtower for automatic updates
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: mizual-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=300  # Check every 5 minutes
+      - WATCHTOWER_CLEANUP=true       # Remove old images
+      - WATCHTOWER_ROLLING_RESTART=true  # Zero-downtime updates
+      - WATCHTOWER_INCLUDE_STOPPED=false
+      - WATCHTOWER_INCLUDE_RESTARTING=false
+      - WATCHTOWER_NOTIFICATIONS_LEVEL=info
+      - WATCHTOWER_NO_PULL=false
+      - WATCHTOWER_MONITOR_ONLY=false
+      - WATCHTOWER_LABEL_ENABLE=true  # Only watch containers with label
+    networks:
+      - mizual-network
+    deploy:
+      resources:
+        limits:
+          memory: 20M
+        reservations:
+          memory: 10M
+    command: --interval 300
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
+    networks:
+      - mizual-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  migration:
+    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    environment:
+      - TZ=Asia/Kolkata
+    env_file:
+      - .env
+    command: python migrate.py
+    networks:
+      - mizual-network
+    restart: "no"
+
+  backend:
+    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    container_name: mizual-backend
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      migration:
+        condition: service_completed_successfully
+    ports:
+      - "80:8000"
+    environment:
+      - TZ=Asia/Kolkata
+    env_file:
+      - .env
+    networks:
+      - mizual-network
+    command: gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 400M
+        reservations:
+          memory: 400M
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"  # Enable watchtower monitoring
+
+  celery:
+    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    container_name: mizual-celery
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      - TZ=Asia/Kolkata
+    env_file:
+      - .env
+    command: celery -A src.tasks.celery worker --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=100
+    networks:
+      - mizual-network
+    healthcheck:
+      test: ["CMD", "celery", "-A", "src.tasks.celery", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+        reservations:
+          memory: 600M
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"  # Enable watchtower monitoring
+
+  logs:
+    image: amir20/dozzle:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DOZZLE_NO_ANALYTICS=true
+    networks:
+      - mizual-network
+
+  monitoring:
+    image: gcr.io/cadvisor/cadvisor:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+    devices:
+      - /dev/kmsg
+    networks:
+      - mizual-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  mizual-network:
+    driver: bridge
