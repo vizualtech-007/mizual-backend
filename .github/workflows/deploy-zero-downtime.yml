@@ -23,16 +23,16 @@ jobs:
         id: set-env
         run: |
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "DEPLOY_HOST=${{ secrets.PROD_HOST }}" >> $GITHUB_OUTPUT
-            echo "DEPLOY_USER=${{ secrets.PROD_USER }}" >> $GITHUB_OUTPUT
-            echo "SSH_KEY=${{ secrets.PROD_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "DEPLOY_HOST=${{ secrets.LIGHTSAIL_PROD_HOST }}" >> $GITHUB_OUTPUT
+            echo "DEPLOY_USER=ubuntu" >> $GITHUB_OUTPUT
+            echo "SSH_KEY=${{ secrets.LIGHTSAIL_PROD_SSH_KEY }}" >> $GITHUB_OUTPUT
             echo "ENV_FILE=${{ secrets.ENV_FILE_PROD }}" >> $GITHUB_OUTPUT
             echo "ENVIRONMENT=production" >> $GITHUB_OUTPUT
             echo "IMAGE_TAG=prod-${{ github.sha }}" >> $GITHUB_OUTPUT
           else
-            echo "DEPLOY_HOST=${{ secrets.DEV_HOST }}" >> $GITHUB_OUTPUT
-            echo "DEPLOY_USER=${{ secrets.DEV_USER }}" >> $GITHUB_OUTPUT
-            echo "SSH_KEY=${{ secrets.DEV_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "DEPLOY_HOST=${{ secrets.LIGHTSAIL_DEV_HOST }}" >> $GITHUB_OUTPUT
+            echo "DEPLOY_USER=ubuntu" >> $GITHUB_OUTPUT
+            echo "SSH_KEY=${{ secrets.LIGHTSAIL_DEV_SSH_KEY }}" >> $GITHUB_OUTPUT
             echo "ENV_FILE=${{ secrets.ENV_FILE_DEV }}" >> $GITHUB_OUTPUT
             echo "ENVIRONMENT=preview" >> $GITHUB_OUTPUT
             echo "IMAGE_TAG=dev-${{ github.sha }}" >> $GITHUB_OUTPUT
@@ -62,36 +62,117 @@ jobs:
           ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
             set -e
             
+            # Check if this is first deployment
+            if [ ! -d /opt/mizual/.git ]; then
+              echo "First deployment detected. Setting up repository..."
+              cd /opt/mizual
+              git clone https://github.com/vizualtech-007/mizual-backend.git .
+              git checkout ${{ github.ref_name }}
+            else
+              echo "Updating existing repository..."
+              cd /opt/mizual
+              git fetch origin
+              git checkout ${{ github.ref_name }}
+              git pull origin ${{ github.ref_name }}
+            fi
+            
+            # Create .env file from GitHub secret
+            echo "Creating .env file..."
+            cat > /opt/mizual/.env << 'ENVFILE'
+${{ steps.set-env.outputs.ENV_FILE }}
+ENVFILE
+            
             # Load the Docker image
             echo "Loading Docker image..."
             docker load < ~/mizual-image.tar.gz
             
-            # Tag for local registry
+            # Tag for local registry and celery
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:latest
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:latest
             
-            # Ensure registry is running
+            # Check if this is first deployment (no registry running)
             if ! docker ps | grep -q mizual-registry; then
-              echo "Starting registry..."
-              docker-compose -f docker-compose.zero-downtime.yml up -d registry
-              sleep 5
+              echo "First deployment: Starting all services..."
+              cd /opt/mizual
+              docker-compose -f docker-compose.zero-downtime.yml up -d registry watchtower
+              sleep 10  # Wait for registry to be ready
+              
+              # Push images to registry
+              echo "Pushing images to local registry..."
+              docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+              docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/mizual-celery:latest
+              
+              # Start all application services
+              docker-compose -f docker-compose.zero-downtime.yml up -d
+              echo "All services started for first deployment!"
+            else
+              echo "Updating existing deployment..."
+              # Push to local registry
+              docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+              docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/mizual-celery:latest
+              
+              # Ensure Watchtower is running
+              if ! docker ps | grep -q mizual-watchtower; then
+                echo "Starting Watchtower..."
+                cd /opt/mizual
+                docker-compose -f docker-compose.zero-downtime.yml up -d watchtower
+              fi
+              
+              echo "Images pushed! Watchtower will detect and update containers within 5 minutes."
             fi
             
-            # Push to local registry
-            echo "Pushing to local registry..."
-            docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
-            docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+            # Clean up old images from registry (keep only latest 5 versions)
+            echo "Cleaning up old registry images..."
+            
+            # Get all tags for backend
+            BACKEND_TAGS=$(curl -s http://localhost:5000/v2/mizual-backend/tags/list | jq -r '.tags[]' | grep -E '^(dev|prod)-' | sort -r)
+            BACKEND_COUNT=$(echo "$BACKEND_TAGS" | wc -l)
+            if [ $BACKEND_COUNT -gt 5 ]; then
+              echo "Found $BACKEND_COUNT backend versions, removing old ones..."
+              echo "$BACKEND_TAGS" | tail -n +6 | while read TAG; do
+                echo "Removing mizual-backend:$TAG"
+                # Registry 2.0 doesn't support delete by default, need to use docker image prune on host
+                docker rmi localhost:5000/mizual-backend:$TAG 2>/dev/null || true
+              done
+            fi
+            
+            # Get all tags for celery
+            CELERY_TAGS=$(curl -s http://localhost:5000/v2/mizual-celery/tags/list | jq -r '.tags[]' | grep -E '^(dev|prod)-' | sort -r)
+            CELERY_COUNT=$(echo "$CELERY_TAGS" | wc -l)
+            if [ $CELERY_COUNT -gt 5 ]; then
+              echo "Found $CELERY_COUNT celery versions, removing old ones..."
+              echo "$CELERY_TAGS" | tail -n +6 | while read TAG; do
+                echo "Removing mizual-celery:$TAG"
+                docker rmi localhost:5000/mizual-celery:$TAG 2>/dev/null || true
+              done
+            fi
+            
+            # Clean up local Docker system
+            docker system prune -f --volumes
+            
+            # Log current deployment version
+            echo "================================================"
+            echo "DEPLOYMENT SUCCESSFUL!"
+            echo "Environment: ${{ steps.set-env.outputs.ENVIRONMENT }}"
+            echo "Version deployed: ${{ steps.set-env.outputs.IMAGE_TAG }}"
+            echo "Git commit: ${{ github.sha }}"
+            echo "Deployed by: ${{ github.actor }}"
+            echo "================================================"
+            
+            # Save deployment info to file for tracking
+            echo "${{ steps.set-env.outputs.IMAGE_TAG }}" > /opt/mizual/CURRENT_VERSION
+            echo "Commit: ${{ github.sha }}" >> /opt/mizual/CURRENT_VERSION
+            echo "Deployed: $(date)" >> /opt/mizual/CURRENT_VERSION
+            echo "Branch: ${{ github.ref_name }}" >> /opt/mizual/CURRENT_VERSION
             
             # Clean up transferred image
             rm ~/mizual-image.tar.gz
-            
-            # Ensure Watchtower is running
-            if ! docker ps | grep -q mizual-watchtower; then
-              echo "Starting Watchtower..."
-              docker-compose -f docker-compose.zero-downtime.yml up -d watchtower
-            fi
-            
-            echo "Deployment complete! Watchtower will detect and update containers within 5 minutes."
           ENDSSH
           
       - name: Verify deployment
@@ -99,10 +180,19 @@ jobs:
           sleep 10
           ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
             echo "Checking container status..."
-            docker ps | grep -E "mizual-backend|mizual-celery|mizual-registry|mizual-watchtower"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | grep -E "mizual|registry|watchtower"
             
+            echo ""
+            echo "Current deployed version:"
+            cat /opt/mizual/CURRENT_VERSION 2>/dev/null || echo "Version file not found"
+            
+            echo ""
             echo "Checking health endpoint..."
             curl -f http://localhost/health || echo "Health check pending..."
+            
+            echo ""
+            echo "Registry contents:"
+            curl -s http://localhost:5000/v2/mizual-backend/tags/list | jq -r '.tags[]' | grep -E '^(dev|prod)-' | head -5 || echo "No versioned tags found"
           ENDSSH
       
       - name: Cleanup
