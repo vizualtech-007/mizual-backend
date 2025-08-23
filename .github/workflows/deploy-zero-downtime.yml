@@ -59,13 +59,64 @@ jobs:
         run: |
           scp -i ~/.ssh/deploy_key mizual-image.tar.gz ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:~/
           
-      - name: Create env file on server
+      - name: Create env file from Parameter Store
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.set-env.outputs.USING_PROD == 'true' && secrets.PROD_AWS_ACCESS_KEY_ID || secrets.DEV_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.set-env.outputs.USING_PROD == 'true' && secrets.PROD_AWS_SECRET_ACCESS_KEY || secrets.DEV_AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-2
         run: |
+          echo "Fetching environment variables from AWS Parameter Store..."
+          
+          # Create .env file from Parameter Store
+          echo "# Generated from AWS Parameter Store $(date)" > .env
+          
+          # Fetch all parameters from Parameter Store
+          aws ssm get-parameters-by-path \
+            --path "/mizual" \
+            --recursive \
+            --with-decryption \
+            --query 'Parameters[*].[Name,Value]' \
+            --output text | \
+          while IFS=$'\t' read -r name value; do
+            # Extract parameter name (remove /mizual/ prefix)
+            param_name=$(basename "$name" | tr '[:lower:]' '[:upper:]')
+            echo "${param_name}=${value}" >> .env
+          done
+          
+          # Add environment-specific fixed parameters
           if [[ "${{ steps.set-env.outputs.USING_PROD }}" == "true" ]]; then
-            echo "${{ secrets.ENV_FILE_PROD }}" | ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "cat > /opt/mizual/.env"
+            echo "DATABASE_SCHEMA=public" >> .env
+            echo "STORAGE_PATH_PREFIX=production" >> .env
           else
-            echo "${{ secrets.ENV_FILE_DEV }}" | ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "cat > /opt/mizual/.env"
+            echo "DATABASE_SCHEMA=preview" >> .env
+            echo "STORAGE_PATH_PREFIX=preview" >> .env
           fi
+          
+          # Add fixed parameters that don't change between environments
+          echo "LOG_LEVEL=INFO" >> .env
+          echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> .env
+          echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> .env
+          echo "MAX_WORKERS=3" >> .env
+          echo "CELERY_CONCURRENCY=3" >> .env
+          echo "CELERY_WORKER_MEMORY_LIMIT=600MB" >> .env
+          echo "LLM_PROVIDER=gemini" >> .env
+          echo "LLM_MODEL=gemini-1.5-flash" >> .env
+          echo "ENABLE_PROMPT_ENHANCEMENT=true" >> .env
+          echo "RATE_LIMIT_BURST_SECONDS=10" >> .env
+          echo "RATE_LIMIT_STATUS_CHECKS_PER_MINUTE=30" >> .env
+          echo "MAX_CHAIN_LENGTH=5" >> .env
+          echo "UNSUPPORTED_IMAGE_TYPES=heic,avif,gif" >> .env
+          
+          # Set LLM_API_KEY to same as GEMINI_API_KEY
+          GEMINI_KEY=$(grep "^GEMINI_API_KEY=" .env | cut -d'=' -f2-)
+          if [ ! -z "$GEMINI_KEY" ]; then
+            echo "LLM_API_KEY=$GEMINI_KEY" >> .env
+          fi
+          
+          echo "Environment file created with $(wc -l < .env) variables"
+          
+          # Copy to server
+          scp -i ~/.ssh/deploy_key .env ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:/opt/mizual/.env
           
       - name: Deploy to server
         run: |
@@ -84,20 +135,34 @@ jobs:
               git fetch origin
               git checkout ${{ github.ref_name }}
               
-              # Handle potential conflicts with untracked files
+              # Handle potential conflicts with modified and untracked files
               if ! git pull origin ${{ github.ref_name }}; then
-                echo "Git pull failed, likely due to untracked files. Backing up and retrying..."
+                echo "Git pull failed, likely due to local changes. Backing up and retrying..."
                 
-                # Back up any conflicting untracked files
+                # Back up any modified or untracked files
                 mkdir -p /tmp/mizual-backup
-                git status --porcelain | grep '^??' | cut -c4- | while read file; do
+                
+                # Handle modified files (M status)
+                git status --porcelain | grep '^ M' | cut -c4- | while read file; do
                   if [ -f "$file" ]; then
-                    echo "Backing up untracked file: $file"
-                    cp "$file" "/tmp/mizual-backup/$(basename $file).backup" || true
+                    echo "Backing up modified file: $file"
+                    cp "$file" "/tmp/mizual-backup/$(basename $file).modified.backup" || true
                   fi
                 done
                 
-                # Remove only specific untracked files that would conflict (avoid registry-data)
+                # Handle untracked files (?? status)
+                git status --porcelain | grep '^??' | cut -c4- | while read file; do
+                  if [ -f "$file" ]; then
+                    echo "Backing up untracked file: $file"
+                    cp "$file" "/tmp/mizual-backup/$(basename $file).untracked.backup" || true
+                  fi
+                done
+                
+                # Reset any local changes (this will discard modified files)
+                echo "Resetting local changes..."
+                git reset --hard HEAD
+                
+                # Remove untracked files (but skip registry-data)
                 git status --porcelain | grep '^??' | cut -c4- | while read file; do
                   # Skip registry-data directory to avoid permission errors
                   if [[ "$file" != registry-data* ]]; then
@@ -106,7 +171,7 @@ jobs:
                   fi
                 done
                 
-                # Retry the pull
+                # Now retry the pull
                 git pull origin ${{ github.ref_name }}
                 
                 echo "Repository updated successfully after handling conflicts"
