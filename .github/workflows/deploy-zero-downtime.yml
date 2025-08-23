@@ -96,9 +96,9 @@ jobs:
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:latest
             
-            # Check if this is first deployment (no registry running)
+            # Detect deployment scenario and handle accordingly
             if ! docker ps | grep -q mizual-registry; then
-              echo "First deployment: Starting all services..."
+              echo "SCENARIO: First deployment (no registry) - Starting all services..."
               cd /opt/mizual
               
               # Start registry and watchtower (registry-data dir created by setup script)
@@ -118,8 +118,27 @@ jobs:
               # Start all application services
               docker-compose -f docker-compose.zero-downtime.yml up -d
               echo "All services started for first deployment!"
+              
+            elif ! docker ps | grep -q mizual-backend; then
+              echo "SCENARIO: Registry exists but containers stopped - Restarting services..."
+              cd /opt/mizual
+              
+              # Push images to registry first
+              docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+              docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/mizual-celery:latest
+              
+              # Ensure registry and watchtower are running
+              docker-compose -f docker-compose.zero-downtime.yml up -d registry watchtower
+              sleep 5
+              
+              # Start all application services (they will use latest images from registry)
+              docker-compose -f docker-compose.zero-downtime.yml up -d
+              echo "All services restarted with latest images!"
+              
             else
-              echo "Updating existing deployment..."
+              echo "SCENARIO: Normal zero-downtime update - Using Watchtower..."
               # Push to local registry
               docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
               docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
@@ -133,7 +152,7 @@ jobs:
                 docker-compose -f docker-compose.zero-downtime.yml up -d watchtower
               fi
               
-              echo "Images pushed! Watchtower will detect and update containers within 5 minutes."
+              echo "Images pushed! Watchtower will detect and update containers within 1 minute."
             fi
             
             # Clean up old images from registry (keep only latest 5 versions)
@@ -209,8 +228,8 @@ jobs:
           echo "Waiting for Watchtower to detect and deploy new image..."
           echo "Expected deployment version: ${{ steps.set-env.outputs.IMAGE_TAG }}"
           
-          # Wait up to 7 minutes (Watchtower polls every 5 minutes + buffer)
-          max_attempts=14  # 14 attempts * 30 seconds = 7 minutes
+          # Wait up to 3 minutes (Watchtower polls every 1 minute + buffer)
+          max_attempts=12  # 12 attempts * 15 seconds = 3 minutes
           attempt=0
           
           while [ $attempt -lt $max_attempts ]; do
@@ -227,15 +246,15 @@ jobs:
                 echo "Expected version: ${{ steps.set-env.outputs.IMAGE_TAG }}"
                 
                 if [ "$deployed_version" = "${{ steps.set-env.outputs.IMAGE_TAG }}" ]; then
-                  echo "✅ SUCCESS: Deployment verified! Version ${{ steps.set-env.outputs.IMAGE_TAG }} is now live."
+                  echo "SUCCESS: Deployment verified! Version ${{ steps.set-env.outputs.IMAGE_TAG }} is now live."
                   
                   # Final health check
                   if ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "curl -f http://localhost/health >/dev/null 2>&1"; then
-                    echo "✅ Health check passed"
-                    echo "🚀 Zero-downtime deployment completed successfully!"
+                    echo "Health check passed"
+                    echo "Zero-downtime deployment completed successfully!"
                     exit 0
                   else
-                    echo "⚠️  WARNING: Deployment version matches but health check failed"
+                    echo "WARNING: Deployment version matches but health check failed"
                     exit 1
                   fi
                 fi
@@ -247,14 +266,14 @@ jobs:
             fi
             
             if [ $attempt -lt $max_attempts ]; then
-              echo "Waiting 30 seconds before next check..."
-              sleep 30
+              echo "Waiting 15 seconds before next check..."
+              sleep 15
             fi
           done
           
-          echo "❌ TIMEOUT: Deployment verification failed after 7 minutes"
+          echo "TIMEOUT: Deployment verification failed after 3 minutes"
           echo "This could mean:"
-          echo "1. Watchtower hasn't detected the new image yet (wait longer)"
+          echo "1. Watchtower hasn't detected the new image yet (wait longer - polls every 1 minute)"
           echo "2. There's an issue with the new image"
           echo "3. The version endpoint is not working"
           

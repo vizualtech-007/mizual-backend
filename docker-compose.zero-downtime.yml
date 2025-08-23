@@ -30,7 +30,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - WATCHTOWER_POLL_INTERVAL=300  # Check every 5 minutes
+      - WATCHTOWER_POLL_INTERVAL=60   # Check every 1 minute (for testing)
       - WATCHTOWER_CLEANUP=true       # Remove old images
       - WATCHTOWER_ROLLING_RESTART=true  # Zero-downtime updates
       - WATCHTOWER_INCLUDE_STOPPED=false
@@ -47,7 +47,7 @@ services:
           memory: 20M
         reservations:
           memory: 10M
-    command: --interval 300
+    command: --interval 60
 
   redis:
     image: redis:7-alpine
