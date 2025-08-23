@@ -64,7 +64,7 @@ services:
       retries: 3
 
   migration:
-    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    image: localhost:5000/mizual-backend:latest
     environment:
       - TZ=Asia/Kolkata
     env_file:
@@ -75,7 +75,7 @@ services:
     restart: "no"
 
   backend:
-    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    image: localhost:5000/mizual-backend:latest
     container_name: mizual-backend
     platform: linux/amd64
     restart: unless-stopped
@@ -109,7 +109,7 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"  # Enable watchtower monitoring
 
   celery:
-    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    image: localhost:5000/mizual-celery:latest
     container_name: mizual-celery
     restart: unless-stopped
     depends_on:
