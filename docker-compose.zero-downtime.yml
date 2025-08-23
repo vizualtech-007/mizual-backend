@@ -179,29 +179,41 @@ services:
       start_period: 15s
 
   monitoring:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: netdata/netdata:stable
+    container_name: mizual-netdata
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "8081:19999"
     volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /etc/localtime:/etc/localtime:ro
+      - ./netdata-alerts.conf:/etc/netdata/health.d/mizual.conf:ro
     environment:
       - TZ=Asia/Kolkata
-    privileged: true
-    devices:
-      - /dev/kmsg
+      - NETDATA_CLAIM_TOKEN=${NETDATA_CLAIM_TOKEN:-}
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - apparmor:unconfined
     networks:
       - mizual-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:19999/api/v1/info"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 50M
+        reservations:
+          memory: 30M
 
 volumes:
   redis_data:
