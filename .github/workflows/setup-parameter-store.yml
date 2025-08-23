@@ -21,8 +21,9 @@ jobs:
           
           # Parse ENV_FILE_DEV and upload to Parameter Store
           echo "${{ secrets.ENV_FILE_DEV }}" | while IFS='=' read -r key value || [ -n "$key" ]; do
-            # Skip comments, empty lines, and lines without =
-            [[ $key =~ ^[[:space:]]*# || -z $key || ! $key =~ = ]] && continue
+            # Skip comments and empty lines
+            [[ $key =~ ^[[:space:]]*# ]] && continue
+            [[ -z $key ]] && continue
             
             # Clean up key (remove leading/trailing whitespace)
             key=$(echo "$key" | xargs)
@@ -62,8 +63,9 @@ jobs:
           
           # Parse ENV_FILE_PROD and upload to Parameter Store
           echo "${{ secrets.ENV_FILE_PROD }}" | while IFS='=' read -r key value || [ -n "$key" ]; do
-            # Skip comments, empty lines, and lines without =
-            [[ $key =~ ^[[:space:]]*# || -z $key || ! $key =~ = ]] && continue
+            # Skip comments and empty lines
+            [[ $key =~ ^[[:space:]]*# ]] && continue
+            [[ -z $key ]] && continue
             
             # Clean up key (remove leading/trailing whitespace)
             key=$(echo "$key" | xargs)

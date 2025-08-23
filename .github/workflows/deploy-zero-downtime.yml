@@ -232,19 +232,38 @@ jobs:
             else
               echo "SCENARIO: Normal zero-downtime update - Using Watchtower..."
               # Push to local registry
+              echo "Pushing images to registry..."
               docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
               docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
               docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
               docker push localhost:5000/mizual-celery:latest
+              
+              # Verify images are in registry
+              echo "Verifying images in registry..."
+              echo "Backend tags:"
+              curl -s http://localhost:5000/v2/mizual-backend/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); [print('  ' + tag) for tag in data.get('tags',[])]" || echo "  Failed to get backend tags"
+              echo "Celery tags:"
+              curl -s http://localhost:5000/v2/mizual-celery/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); [print('  ' + tag) for tag in data.get('tags',[])]" || echo "  Failed to get celery tags"
+              
+              # Give registry a moment to settle
+              sleep 3
               
               # Ensure Watchtower is running
               if ! docker ps | grep -q mizual-watchtower; then
                 echo "Starting Watchtower..."
                 cd /opt/mizual
                 docker-compose -f docker-compose.zero-downtime.yml up -d watchtower
+                sleep 5
               fi
               
-              echo "Images pushed! Watchtower will detect and update containers within 1 minute."
+              # Force Watchtower to check now (send SIGUSR1 signal)
+              if docker ps | grep -q mizual-watchtower; then
+                echo "Triggering immediate Watchtower update check..."
+                docker kill -s SIGUSR1 mizual-watchtower || echo "Failed to signal Watchtower (container may be restarting)"
+              fi
+              
+              echo "Images pushed and verified! Watchtower will detect and update containers within 1 minute."
+              echo "Current time: $(date)"
             fi
             
             # Clean up old images from registry (keep only latest 5 versions)
@@ -297,6 +316,11 @@ jobs:
             
             # Show registry disk usage after cleanup
             echo "Registry storage after cleanup: $(du -sh /opt/mizual/registry-data | cut -f1)"
+            
+            # Verify latest tags still exist after cleanup
+            echo "Verifying latest tags after cleanup:"
+            echo "Backend latest tag exists:" $(curl -s http://localhost:5000/v2/mizual-backend/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); print('latest' in data.get('tags',[]))" || echo "false")
+            echo "Celery latest tag exists:" $(curl -s http://localhost:5000/v2/mizual-celery/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); print('latest' in data.get('tags',[]))" || echo "false")
             
             # Log current deployment version
             echo "================================================"
