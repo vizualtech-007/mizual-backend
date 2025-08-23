@@ -11,10 +11,17 @@ services:
     volumes:
       - /opt/mizual/registry-data:/var/lib/registry
     environment:
-      REGISTRY_STORAGE_DELETE_ENABLED: "true"
-      REGISTRY_HTTP_SECRET: ${REGISTRY_SECRET:-defaultsecret}  # Change this in production
+      - TZ=Asia/Kolkata
+      - REGISTRY_STORAGE_DELETE_ENABLED=true
+      - REGISTRY_HTTP_SECRET=${REGISTRY_SECRET:-defaultsecret}
     networks:
       - mizual-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/v2/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -30,6 +37,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      - TZ=Asia/Kolkata
       - WATCHTOWER_POLL_INTERVAL=60   # Check every 1 minute (for testing)
       - WATCHTOWER_CLEANUP=true       # Remove old images
       - WATCHTOWER_ROLLING_RESTART=true  # Zero-downtime updates
@@ -41,6 +49,12 @@ services:
       - WATCHTOWER_LABEL_ENABLE=true  # Only watch containers with label
     networks:
       - mizual-network
+    healthcheck:
+      test: ["CMD", "sh", "-c", "ps aux | grep watchtower | grep -v grep"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     deploy:
       resources:
         limits:
@@ -54,6 +68,8 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
+    environment:
+      - TZ=Asia/Kolkata
     command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
     networks:
       - mizual-network
@@ -62,6 +78,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
 
   migration:
     image: localhost:5000/mizual-backend:latest
@@ -149,9 +166,16 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
+      - TZ=Asia/Kolkata
       - DOZZLE_NO_ANALYTICS=true
     networks:
       - mizual-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   monitoring:
     image: gcr.io/cadvisor/cadvisor:latest
@@ -164,11 +188,19 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
       - /dev/disk/:/dev/disk:ro
+    environment:
+      - TZ=Asia/Kolkata
     privileged: true
     devices:
       - /dev/kmsg
     networks:
       - mizual-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
 
 volumes:
   redis_data:
