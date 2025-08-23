@@ -249,12 +249,14 @@ jobs:
                   echo "SUCCESS: Deployment verified! Version ${{ steps.set-env.outputs.IMAGE_TAG }} is now live."
                   
                   # Final health check
-                  if ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "curl -f http://localhost/health >/dev/null 2>&1"; then
+                  echo "Performing final health check..."
+                  if ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "curl -f --connect-timeout 10 --max-time 30 http://localhost/health"; then
                     echo "Health check passed"
                     echo "Zero-downtime deployment completed successfully!"
                     exit 0
                   else
                     echo "WARNING: Deployment version matches but health check failed"
+                    echo "Deployment is successful but health endpoint not responding as expected"
                     exit 1
                   fi
                 fi
