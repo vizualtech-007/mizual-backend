@@ -97,8 +97,14 @@ jobs:
                   fi
                 done
                 
-                # Remove untracked files that would conflict
-                git clean -fd
+                # Remove only specific untracked files that would conflict (avoid registry-data)
+                git status --porcelain | grep '^??' | cut -c4- | while read file; do
+                  # Skip registry-data directory to avoid permission errors
+                  if [[ "$file" != registry-data* ]]; then
+                    echo "Removing untracked file: $file"
+                    rm -f "$file" || true
+                  fi
+                done
                 
                 # Retry the pull
                 git pull origin ${{ github.ref_name }}
