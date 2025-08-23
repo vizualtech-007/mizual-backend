@@ -1,0 +1,18 @@
+[Unit]
+Description=Mizual Monitoring and Log Shipping
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+RemainAfterExit=yes
+
+# Ensure cron jobs are active
+ExecStartPost=/bin/bash -c 'systemctl restart crond || systemctl restart cron'
+
+# Ensure CloudWatch agent is running
+ExecStartPost=/bin/bash -c 'systemctl start amazon-cloudwatch-agent || true'
+
+[Install]
+WantedBy=multi-user.target

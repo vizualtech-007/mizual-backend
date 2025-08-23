@@ -109,4 +109,14 @@ echo "2. Update GitHub secrets with this server IP: $(curl -s ifconfig.me)"
 echo "3. Logout and login again to apply docker group membership"
 echo "4. Test deployment by pushing to dev/main branch"
 
+# 11. Setup monitoring and log shipping
+print_status "Setting up monitoring and log shipping..."
+if [ -f /opt/mizual/lightsail-setup/setup-monitoring.sh ]; then
+    bash /opt/mizual/lightsail-setup/setup-monitoring.sh
+    print_success "Monitoring and log shipping configured"
+else
+    print_warning "Monitoring setup script not found. Run manually later with:"
+    echo "   bash /opt/mizual/lightsail-setup/setup-monitoring.sh"
+fi
+
 print_status "Run 'newgrp docker' or logout/login to use docker without sudo"
