@@ -83,7 +83,28 @@ jobs:
               cd /opt/mizual
               git fetch origin
               git checkout ${{ github.ref_name }}
-              git pull origin ${{ github.ref_name }}
+              
+              # Handle potential conflicts with untracked files
+              if ! git pull origin ${{ github.ref_name }}; then
+                echo "Git pull failed, likely due to untracked files. Backing up and retrying..."
+                
+                # Back up any conflicting untracked files
+                mkdir -p /tmp/mizual-backup
+                git status --porcelain | grep '^??' | cut -c4- | while read file; do
+                  if [ -f "$file" ]; then
+                    echo "Backing up untracked file: $file"
+                    cp "$file" "/tmp/mizual-backup/$(basename $file).backup" || true
+                  fi
+                done
+                
+                # Remove untracked files that would conflict
+                git clean -fd
+                
+                # Retry the pull
+                git pull origin ${{ github.ref_name }}
+                
+                echo "Repository updated successfully after handling conflicts"
+              fi
             fi
             
             # Load the Docker image
@@ -223,6 +244,12 @@ jobs:
             
             # Clean up transferred image
             rm ~/mizual-image.tar.gz
+            
+            # Clean up backup files if they exist
+            if [ -d /tmp/mizual-backup ]; then
+              echo "Cleaning up backup files..."
+              rm -rf /tmp/mizual-backup
+            fi
           ENDSSH
           
       - name: Verify deployment
