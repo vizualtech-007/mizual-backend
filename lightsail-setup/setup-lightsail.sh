@@ -78,6 +78,12 @@ sudo mkdir -p /opt/mizual
 sudo chown ubuntu:ubuntu /opt/mizual
 print_success "Application directory created"
 
+# 8a. Create registry data directory for zero-downtime deployments
+print_status "Creating registry data directory..."
+sudo mkdir -p /opt/mizual/registry-data
+sudo chown ubuntu:ubuntu /opt/mizual/registry-data
+print_success "Registry directory created for zero-downtime deployments"
+
 # 9. Setup directory structure
 print_status "Setting up directory structure..."
 cd /opt/mizual

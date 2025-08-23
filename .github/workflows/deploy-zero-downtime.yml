@@ -101,10 +101,7 @@ jobs:
               echo "First deployment: Starting all services..."
               cd /opt/mizual
               
-              # Clean up any existing problematic volumes
-              docker volume rm mizual_registry_data 2>/dev/null || true
-              
-              # Start registry and watchtower
+              # Start registry and watchtower (registry-data dir created by setup script)
               docker-compose -f docker-compose.zero-downtime.yml up -d registry watchtower
               sleep 10  # Wait for registry to be ready
               
