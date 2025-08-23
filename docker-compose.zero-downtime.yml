@@ -90,6 +90,8 @@ services:
       - TZ=Asia/Kolkata
     env_file:
       - .env
+    volumes:
+      - /opt/mizual/CURRENT_VERSION:/opt/mizual/CURRENT_VERSION:ro
     networks:
       - mizual-network
     command: gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000
