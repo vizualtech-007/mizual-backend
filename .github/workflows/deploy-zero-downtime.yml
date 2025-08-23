@@ -204,6 +204,76 @@ jobs:
             curl -s http://localhost:5000/v2/mizual-backend/tags/list | jq -r '.tags[]' | grep -E '^(dev|prod)-' | head -5 || echo "No versioned tags found"
           ENDSSH
       
+      - name: Wait for Watchtower and verify deployment
+        run: |
+          echo "Waiting for Watchtower to detect and deploy new image..."
+          echo "Expected deployment version: ${{ steps.set-env.outputs.IMAGE_TAG }}"
+          
+          # Wait up to 7 minutes (Watchtower polls every 5 minutes + buffer)
+          max_attempts=14  # 14 attempts * 30 seconds = 7 minutes
+          attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            attempt=$((attempt + 1))
+            echo "Attempt $attempt/$max_attempts: Checking deployment status..."
+            
+            # Check if the version endpoint returns the expected version
+            if response=$(ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "curl -s http://localhost/version"); then
+              echo "Version endpoint response: $response"
+              
+              # Extract version_tag from JSON response
+              if deployed_version=$(echo "$response" | jq -r '.version_tag // empty' 2>/dev/null); then
+                echo "Currently deployed version: $deployed_version"
+                echo "Expected version: ${{ steps.set-env.outputs.IMAGE_TAG }}"
+                
+                if [ "$deployed_version" = "${{ steps.set-env.outputs.IMAGE_TAG }}" ]; then
+                  echo "✅ SUCCESS: Deployment verified! Version ${{ steps.set-env.outputs.IMAGE_TAG }} is now live."
+                  
+                  # Final health check
+                  if ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "curl -f http://localhost/health >/dev/null 2>&1"; then
+                    echo "✅ Health check passed"
+                    echo "🚀 Zero-downtime deployment completed successfully!"
+                    exit 0
+                  else
+                    echo "⚠️  WARNING: Deployment version matches but health check failed"
+                    exit 1
+                  fi
+                fi
+              else
+                echo "Could not parse version from API response"
+              fi
+            else
+              echo "API not responding, waiting..."
+            fi
+            
+            if [ $attempt -lt $max_attempts ]; then
+              echo "Waiting 30 seconds before next check..."
+              sleep 30
+            fi
+          done
+          
+          echo "❌ TIMEOUT: Deployment verification failed after 7 minutes"
+          echo "This could mean:"
+          echo "1. Watchtower hasn't detected the new image yet (wait longer)"
+          echo "2. There's an issue with the new image"
+          echo "3. The version endpoint is not working"
+          
+          # Show final status for debugging
+          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
+            echo ""
+            echo "=== FINAL STATUS FOR DEBUGGING ==="
+            echo "Watchtower logs (last 20 lines):"
+            docker logs mizual-watchtower --tail 20 || echo "Could not get Watchtower logs"
+            echo ""
+            echo "Container status:"
+            docker ps --format "table {{.Names}}\t{{.Image}}\t{{.CreatedAt}}" | grep mizual || echo "No mizual containers found"
+            echo ""
+            echo "Version file contents:"
+            cat /opt/mizual/CURRENT_VERSION 2>/dev/null || echo "Version file not found"
+          ENDSSH
+          
+          exit 1
+      
       - name: Cleanup
         if: always()
         run: |
