@@ -25,23 +25,25 @@ jobs:
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
             echo "DEPLOY_HOST=${{ secrets.LIGHTSAIL_PROD_HOST }}" >> $GITHUB_OUTPUT
             echo "DEPLOY_USER=ubuntu" >> $GITHUB_OUTPUT
-            echo "SSH_KEY=${{ secrets.LIGHTSAIL_PROD_SSH_KEY }}" >> $GITHUB_OUTPUT
-            echo "ENV_FILE=${{ secrets.ENV_FILE_PROD }}" >> $GITHUB_OUTPUT
             echo "ENVIRONMENT=production" >> $GITHUB_OUTPUT
             echo "IMAGE_TAG=prod-${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "USING_PROD=true" >> $GITHUB_OUTPUT
           else
             echo "DEPLOY_HOST=${{ secrets.LIGHTSAIL_DEV_HOST }}" >> $GITHUB_OUTPUT
             echo "DEPLOY_USER=ubuntu" >> $GITHUB_OUTPUT
-            echo "SSH_KEY=${{ secrets.LIGHTSAIL_DEV_SSH_KEY }}" >> $GITHUB_OUTPUT
-            echo "ENV_FILE=${{ secrets.ENV_FILE_DEV }}" >> $GITHUB_OUTPUT
             echo "ENVIRONMENT=preview" >> $GITHUB_OUTPUT
             echo "IMAGE_TAG=dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "USING_PROD=false" >> $GITHUB_OUTPUT
           fi
       
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ steps.set-env.outputs.SSH_KEY }}" > ~/.ssh/deploy_key
+          if [[ "${{ steps.set-env.outputs.USING_PROD }}" == "true" ]]; then
+            echo "${{ secrets.LIGHTSAIL_PROD_SSH_KEY }}" > ~/.ssh/deploy_key
+          else
+            echo "${{ secrets.LIGHTSAIL_DEV_SSH_KEY }}" > ~/.ssh/deploy_key
+          fi
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H ${{ steps.set-env.outputs.DEPLOY_HOST }} >> ~/.ssh/known_hosts
       
@@ -56,6 +58,14 @@ jobs:
       - name: Transfer image to server
         run: |
           scp -i ~/.ssh/deploy_key mizual-image.tar.gz ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:~/
+          
+      - name: Create env file on server
+        run: |
+          if [[ "${{ steps.set-env.outputs.USING_PROD }}" == "true" ]]; then
+            echo "${{ secrets.ENV_FILE_PROD }}" | ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "cat > /opt/mizual/.env"
+          else
+            echo "${{ secrets.ENV_FILE_DEV }}" | ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "cat > /opt/mizual/.env"
+          fi
           
       - name: Deploy to server
         run: |
@@ -75,10 +85,6 @@ jobs:
               git checkout ${{ github.ref_name }}
               git pull origin ${{ github.ref_name }}
             fi
-            
-            # Create .env file from GitHub secret
-            echo "Creating .env file..."
-            echo '${{ steps.set-env.outputs.ENV_FILE }}' > /opt/mizual/.env
             
             # Load the Docker image
             echo "Loading Docker image..."
