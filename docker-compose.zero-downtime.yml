@@ -51,7 +51,7 @@ services:
     networks:
       - mizual-network
     healthcheck:
-      test: ["CMD", "sh", "-c", "ps aux | grep watchtower | grep -v grep"]
+      test: ["CMD", "/watchtower", "--health-check"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -172,11 +172,11 @@ services:
     networks:
       - mizual-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080"]
+      test: ["CMD", "/dozzle", "healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 30s
 
   monitoring:
     image: netdata/netdata:stable
@@ -194,8 +194,13 @@ services:
       - ./netdata-alerts.conf:/etc/netdata/health.d/mizual.conf:ro
     environment:
       - TZ=Asia/Kolkata
-      - NETDATA_CLAIM_TOKEN=${NETDATA_CLAIM_TOKEN:-}
       - DOCKER_HOST=unix:///var/run/docker.sock
+      # Minimize memory usage but keep alerts
+      - NETDATA_DISABLE_CLOUD=yes
+      - DISABLE_TELEMETRY=1
+      - NETDATA_MEMORY_MODE=save
+      - NETDATA_UPDATE_EVERY=2
+      - NETDATA_HEALTH_ENABLED=yes
     cap_add:
       - SYS_PTRACE
     security_opt:
@@ -207,13 +212,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
+      start_period: 40s
     deploy:
       resources:
         limits:
           memory: 50M
         reservations:
-          memory: 30M
+          memory: 40M
 
 volumes:
   redis_data:
