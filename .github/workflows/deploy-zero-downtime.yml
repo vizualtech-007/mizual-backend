@@ -1,0 +1,112 @@
+name: Zero-Downtime Deploy to Lightsail
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  REGISTRY_URL: localhost:5000
+  IMAGE_NAME: mizual-backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set environment based on branch
+        id: set-env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "DEPLOY_HOST=${{ secrets.PROD_HOST }}" >> $GITHUB_OUTPUT
+            echo "DEPLOY_USER=${{ secrets.PROD_USER }}" >> $GITHUB_OUTPUT
+            echo "SSH_KEY=${{ secrets.PROD_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "ENV_FILE=${{ secrets.ENV_FILE_PROD }}" >> $GITHUB_OUTPUT
+            echo "ENVIRONMENT=production" >> $GITHUB_OUTPUT
+            echo "IMAGE_TAG=prod-${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "DEPLOY_HOST=${{ secrets.DEV_HOST }}" >> $GITHUB_OUTPUT
+            echo "DEPLOY_USER=${{ secrets.DEV_USER }}" >> $GITHUB_OUTPUT
+            echo "SSH_KEY=${{ secrets.DEV_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "ENV_FILE=${{ secrets.ENV_FILE_DEV }}" >> $GITHUB_OUTPUT
+            echo "ENVIRONMENT=preview" >> $GITHUB_OUTPUT
+            echo "IMAGE_TAG=dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ steps.set-env.outputs.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ steps.set-env.outputs.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Build Docker image with ultra-slim Dockerfile
+        run: |
+          docker build -f Dockerfile.ultra-slim -t ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} .
+          
+      - name: Save Docker image as tar
+        run: |
+          docker save ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} | gzip > mizual-image.tar.gz
+          
+      - name: Transfer image to server
+        run: |
+          scp -i ~/.ssh/deploy_key mizual-image.tar.gz ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:~/
+          
+      - name: Deploy to server
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
+            set -e
+            
+            # Load the Docker image
+            echo "Loading Docker image..."
+            docker load < ~/mizual-image.tar.gz
+            
+            # Tag for local registry
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:latest
+            
+            # Ensure registry is running
+            if ! docker ps | grep -q mizual-registry; then
+              echo "Starting registry..."
+              docker-compose -f docker-compose.zero-downtime.yml up -d registry
+              sleep 5
+            fi
+            
+            # Push to local registry
+            echo "Pushing to local registry..."
+            docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
+            docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+            
+            # Clean up transferred image
+            rm ~/mizual-image.tar.gz
+            
+            # Ensure Watchtower is running
+            if ! docker ps | grep -q mizual-watchtower; then
+              echo "Starting Watchtower..."
+              docker-compose -f docker-compose.zero-downtime.yml up -d watchtower
+            fi
+            
+            echo "Deployment complete! Watchtower will detect and update containers within 5 minutes."
+          ENDSSH
+          
+      - name: Verify deployment
+        run: |
+          sleep 10
+          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
+            echo "Checking container status..."
+            docker ps | grep -E "mizual-backend|mizual-celery|mizual-registry|mizual-watchtower"
+            
+            echo "Checking health endpoint..."
+            curl -f http://localhost/health || echo "Health check pending..."
+          ENDSSH
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key
+          docker rmi ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} || true
