@@ -78,9 +78,7 @@ jobs:
             
             # Create .env file from GitHub secret
             echo "Creating .env file..."
-            cat > /opt/mizual/.env << 'ENVFILE'
-${{ steps.set-env.outputs.ENV_FILE }}
-ENVFILE
+            echo '${{ steps.set-env.outputs.ENV_FILE }}' > /opt/mizual/.env
             
             # Load the Docker image
             echo "Loading Docker image..."
