@@ -182,16 +182,30 @@ jobs:
             echo "Loading Docker image..."
             docker load < ~/mizual-image.tar.gz
             
-            # Tag for local registry and celery
+            # Tag for local registry (backend and celery use same image)
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:latest
+            # Celery uses the same image as backend, just different registry name
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:latest
             
             # Ensure latest tags always exist in registry (failsafe)
             echo "Failsafe: Ensuring latest tags exist in registry..."
-            docker push localhost:5000/${{ env.IMAGE_NAME }}:latest || echo "Failed to push backend:latest"
-            docker push localhost:5000/mizual-celery:latest || echo "Failed to push celery:latest"
+            # Check if registry is accessible first
+            if curl -f -s http://localhost:5000/v2/ > /dev/null; then
+              echo "Registry is accessible, pushing latest tags..."
+              echo "Pushing backend:latest..."
+              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest || echo "Warning: Failed to push backend:latest"
+              echo "Pushing celery:latest..."
+              docker push localhost:5000/mizual-celery:latest || echo "Warning: Failed to push celery:latest"
+              
+              # Verify both latest tags exist
+              echo "Verifying latest tags in registry:"
+              curl -s http://localhost:5000/v2/mizual-backend/tags/list | grep -q '"latest"' && echo "✓ backend:latest exists" || echo "✗ backend:latest missing"
+              curl -s http://localhost:5000/v2/mizual-celery/tags/list | grep -q '"latest"' && echo "✓ celery:latest exists" || echo "✗ celery:latest missing"
+            else
+              echo "Registry not accessible yet, will be started in deployment scenario"
+            fi
             
             # Detect deployment scenario and handle accordingly
             if ! docker ps | grep -q mizual-registry; then
