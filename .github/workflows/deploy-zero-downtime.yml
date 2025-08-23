@@ -100,6 +100,10 @@ jobs:
             if ! docker ps | grep -q mizual-registry; then
               echo "First deployment: Starting all services..."
               cd /opt/mizual
+              
+              # Create registry data directory
+              mkdir -p /opt/mizual/registry-data
+              
               docker-compose -f docker-compose.zero-downtime.yml up -d registry watchtower
               sleep 10  # Wait for registry to be ready
               
