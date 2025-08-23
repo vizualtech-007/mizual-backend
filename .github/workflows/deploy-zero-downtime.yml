@@ -159,30 +159,52 @@ jobs:
             echo "Cleaning up old registry images..."
             
             # Get all tags for backend
-            BACKEND_TAGS=$(curl -s http://localhost:5000/v2/mizual-backend/tags/list | jq -r '.tags[]' | grep -E '^(dev|prod)-' | sort -r)
+            BACKEND_TAGS=$(curl -s http://localhost:5000/v2/mizual-backend/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); [print(tag) for tag in data.get('tags',[])]" | grep -E '^(dev|prod)-' | sort -r)
             BACKEND_COUNT=$(echo "$BACKEND_TAGS" | wc -l)
             if [ $BACKEND_COUNT -gt 5 ]; then
-              echo "Found $BACKEND_COUNT backend versions, removing old ones..."
+              echo "Found $BACKEND_COUNT backend versions, keeping only latest 5..."
               echo "$BACKEND_TAGS" | tail -n +6 | while read TAG; do
-                echo "Removing mizual-backend:$TAG"
-                # Registry 2.0 doesn't support delete by default, need to use docker image prune on host
+                echo "Deleting mizual-backend:$TAG from registry"
+                # Get the digest for this tag
+                DIGEST=$(curl -s -I -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                  http://localhost:5000/v2/mizual-backend/manifests/$TAG | grep Docker-Content-Digest | awk '{print $2}' | tr -d '\r')
+                if [ ! -z "$DIGEST" ]; then
+                  # Delete the manifest from registry
+                  curl -X DELETE http://localhost:5000/v2/mizual-backend/manifests/$DIGEST 2>/dev/null || true
+                fi
+                # Also remove local image
                 docker rmi localhost:5000/mizual-backend:$TAG 2>/dev/null || true
               done
             fi
             
             # Get all tags for celery
-            CELERY_TAGS=$(curl -s http://localhost:5000/v2/mizual-celery/tags/list | jq -r '.tags[]' | grep -E '^(dev|prod)-' | sort -r)
+            CELERY_TAGS=$(curl -s http://localhost:5000/v2/mizual-celery/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); [print(tag) for tag in data.get('tags',[])]" | grep -E '^(dev|prod)-' | sort -r)
             CELERY_COUNT=$(echo "$CELERY_TAGS" | wc -l)
             if [ $CELERY_COUNT -gt 5 ]; then
-              echo "Found $CELERY_COUNT celery versions, removing old ones..."
+              echo "Found $CELERY_COUNT celery versions, keeping only latest 5..."
               echo "$CELERY_TAGS" | tail -n +6 | while read TAG; do
-                echo "Removing mizual-celery:$TAG"
+                echo "Deleting mizual-celery:$TAG from registry"
+                # Get the digest for this tag
+                DIGEST=$(curl -s -I -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                  http://localhost:5000/v2/mizual-celery/manifests/$TAG | grep Docker-Content-Digest | awk '{print $2}' | tr -d '\r')
+                if [ ! -z "$DIGEST" ]; then
+                  # Delete the manifest from registry
+                  curl -X DELETE http://localhost:5000/v2/mizual-celery/manifests/$DIGEST 2>/dev/null || true
+                fi
+                # Also remove local image
                 docker rmi localhost:5000/mizual-celery:$TAG 2>/dev/null || true
               done
             fi
             
+            # Run registry garbage collection to actually free up space
+            echo "Running registry garbage collection..."
+            docker exec mizual-registry registry garbage-collect /etc/docker/registry/config.yml 2>/dev/null || true
+            
             # Clean up local Docker system
             docker system prune -f --volumes
+            
+            # Show registry disk usage after cleanup
+            echo "Registry storage after cleanup: $(du -sh /opt/mizual/registry-data | cut -f1)"
             
             # Log current deployment version
             echo "================================================"
@@ -220,7 +242,7 @@ jobs:
             
             echo ""
             echo "Registry contents:"
-            curl -s http://localhost:5000/v2/mizual-backend/tags/list | jq -r '.tags[]' | grep -E '^(dev|prod)-' | head -5 || echo "No versioned tags found"
+            curl -s http://localhost:5000/v2/mizual-backend/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); [print(tag) for tag in data.get('tags',[])]" | grep -E '^(dev|prod)-' | head -5 || echo "No versioned tags found"
           ENDSSH
       
       - name: Wait for Watchtower and verify deployment
@@ -241,7 +263,7 @@ jobs:
               echo "Version endpoint response: $response"
               
               # Extract version_tag from JSON response
-              if deployed_version=$(echo "$response" | jq -r '.version_tag // empty' 2>/dev/null); then
+              if deployed_version=$(echo "$response" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('version_tag',''))" 2>/dev/null); then
                 echo "Currently deployed version: $deployed_version"
                 echo "Expected version: ${{ steps.set-env.outputs.IMAGE_TAG }}"
                 

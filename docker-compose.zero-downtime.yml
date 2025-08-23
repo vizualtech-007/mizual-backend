@@ -14,6 +14,7 @@ services:
       - TZ=Asia/Kolkata
       - REGISTRY_STORAGE_DELETE_ENABLED=true
       - REGISTRY_HTTP_SECRET=${REGISTRY_SECRET:-defaultsecret}
+      - REGISTRY_HTTP_HEADERS_X-Content-Type-Options=[nosniff]
     networks:
       - mizual-network
     healthcheck:
