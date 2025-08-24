@@ -237,7 +237,7 @@ jobs:
               crontab -l | grep mizual-monitoring
             fi
             
-            echo "=== End monitoring check ===
+            echo "=== End monitoring check ==="
             
             # Load the Docker image
             echo "Loading Docker image..."
