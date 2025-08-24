@@ -402,8 +402,41 @@ jobs:
                 docker kill -s SIGUSR1 mizual-watchtower || echo "Failed to signal Watchtower (container may be restarting)"
               fi
               
-              echo "Images pushed and verified! Watchtower will detect and update containers within 1 minute."
+              echo "Images pushed! Waiting for Watchtower to update containers..."
               echo "Current time: $(date)"
+              
+              # Wait for Watchtower to update the containers
+              echo "Monitoring Watchtower update progress..."
+              MAX_WAIT=120  # Maximum 2 minutes wait
+              WAIT_TIME=0
+              UPDATE_COMPLETE=false
+              
+              while [ $WAIT_TIME -lt $MAX_WAIT ]; do
+                # Check if containers are running the new image
+                BACKEND_IMAGE=$(docker ps --format "{{.Image}}" --filter "name=mizual-backend" | head -1)
+                CELERY_IMAGE=$(docker ps --format "{{.Image}}" --filter "name=mizual-celery" | head -1)
+                
+                if [ "$BACKEND_IMAGE" = "localhost:5000/mizual-backend:latest" ] && [ "$CELERY_IMAGE" = "localhost:5000/mizual-celery:latest" ]; then
+                  # Check if the actual image ID matches what we just pushed
+                  BACKEND_ID=$(docker inspect mizual-backend --format='{{.Image}}' | cut -d: -f2 | cut -c1-12)
+                  EXPECTED_ID=$(docker inspect localhost:5000/mizual-backend:latest --format='{{.Id}}' | cut -d: -f2 | cut -c1-12)
+                  
+                  if [ "$BACKEND_ID" = "$EXPECTED_ID" ]; then
+                    UPDATE_COMPLETE=true
+                    echo "✓ Watchtower successfully updated containers!"
+                    break
+                  fi
+                fi
+                
+                echo "  Waiting for Watchtower to update... ($WAIT_TIME/$MAX_WAIT seconds)"
+                sleep 10
+                WAIT_TIME=$((WAIT_TIME + 10))
+              done
+              
+              if [ "$UPDATE_COMPLETE" = "false" ]; then
+                echo "WARNING: Watchtower update may not have completed within $MAX_WAIT seconds"
+                echo "Containers may update in the next Watchtower cycle"
+              fi
             fi
             
             # CRITICAL: Ensure :latest tags exist in registry for Watchtower
@@ -516,11 +549,40 @@ jobs:
             echo "Deployed by: ${{ github.actor }}"
             echo "================================================"
             
-            # Save deployment info to file for tracking
-            echo "${{ steps.set-env.outputs.IMAGE_TAG }}" > /opt/mizual/CURRENT_VERSION
-            echo "Commit: ${{ github.sha }}" >> /opt/mizual/CURRENT_VERSION
-            echo "Deployed: $(date)" >> /opt/mizual/CURRENT_VERSION
-            echo "Branch: ${{ github.ref_name }}" >> /opt/mizual/CURRENT_VERSION
+            # Save deployment info ONLY after confirming containers are updated
+            # Check if containers are actually running the new version
+            echo "Verifying containers are running latest version before updating CURRENT_VERSION..."
+            CONTAINERS_UPDATED=false
+            
+            # For non-Watchtower scenarios (first deployment or stopped containers), always update
+            if ! docker ps | grep -q mizual-watchtower || [ ! -f /opt/mizual/CURRENT_VERSION ]; then
+              CONTAINERS_UPDATED=true
+              echo "Non-Watchtower scenario or first deployment - updating version file"
+            else
+              # For Watchtower scenario, verify containers are actually updated
+              BACKEND_IMAGE=$(docker ps --format "{{.Image}}" --filter "name=mizual-backend" | head -1)
+              CELERY_IMAGE=$(docker ps --format "{{.Image}}" --filter "name=mizual-celery" | head -1)
+              
+              if [ "$BACKEND_IMAGE" = "localhost:5000/mizual-backend:latest" ] && [ "$CELERY_IMAGE" = "localhost:5000/mizual-celery:latest" ]; then
+                CONTAINERS_UPDATED=true
+                echo "Containers confirmed running latest images"
+              else
+                echo "WARNING: Containers not yet updated, skipping CURRENT_VERSION update"
+                echo "Backend image: $BACKEND_IMAGE"
+                echo "Celery image: $CELERY_IMAGE"
+              fi
+            fi
+            
+            # Only update version file if containers are confirmed updated
+            if [ "$CONTAINERS_UPDATED" = "true" ]; then
+              echo "${{ steps.set-env.outputs.IMAGE_TAG }}" > /opt/mizual/CURRENT_VERSION
+              echo "Commit: ${{ github.sha }}" >> /opt/mizual/CURRENT_VERSION
+              echo "Deployed: $(date)" >> /opt/mizual/CURRENT_VERSION
+              echo "Branch: ${{ github.ref_name }}" >> /opt/mizual/CURRENT_VERSION
+              echo "✓ CURRENT_VERSION file updated"
+            else
+              echo "⚠ CURRENT_VERSION file NOT updated - containers not yet running new version"
+            fi
             
             # Clean up transferred image
             rm ~/mizual-image.tar.gz
