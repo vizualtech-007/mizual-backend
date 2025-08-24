@@ -5,6 +5,7 @@ This file provides guidance to Claude Code when working with Lightsail deploymen
 **Last Updated**: August 24, 2025
 **Purpose**: AWS Lightsail instance setup, zero-downtime deployment, and monitoring configuration
 **Status**: FULLY OPERATIONAL - Zero-downtime deployment working for both fresh instances and updates
+**Architecture**: Git-free deployment - Uses Docker images and SCP only (no git operations on server)
 
 ## Overview
 
@@ -18,12 +19,16 @@ This directory contains scripts for setting up and managing Mizual backend deplo
 - **Docker Compose** - Orchestrates all services
 - **GitHub Actions** - Builds and deploys images automatically
 
-### Deployment Flow
+### Deployment Flow (Git-Free Architecture)
 1. GitHub Actions builds Docker image on push to `dev` or `main` branch
 2. Image is transferred to Lightsail instance via SCP
-3. Image is pushed to local registry at `localhost:5000`
-4. Watchtower detects new image and performs rolling update
-5. No downtime during the entire process
+3. `.env` file created from AWS Parameter Store and transferred via SCP
+4. `docker-compose.zero-downtime.yml` transferred via SCP
+5. Image is pushed to local registry at `localhost:5000`
+6. Watchtower detects new image and performs rolling update
+7. No downtime during the entire process
+
+**Key Point**: No git operations on server - everything runs from Docker images
 
 ## Scripts in this Directory
 
@@ -94,16 +99,10 @@ This directory contains scripts for setting up and managing Mizual backend deplo
 
 ```
 /opt/mizual/                      # Main application directory
-├── .env                          # Environment variables (from Parameter Store)
-├── .git/                         # Git repository
+├── .env                          # Environment variables (from Parameter Store via SCP)
+├── docker-compose.zero-downtime.yml  # Docker compose file (from GitHub via SCP)
 ├── CURRENT_VERSION               # Deployment version tracking
-├── registry-data/                # Docker registry persistent storage
-├── logs/                         # Temporary log storage (before shipping)
-├── docker-compose.zero-downtime.yml
-└── lightsail-setup/
-    ├── setup-lightsail.sh
-    ├── setup-monitoring.sh
-    └── verify-deployment.sh
+└── registry-data/                # Docker registry persistent storage
 
 /opt/mizual-monitoring/           # Monitoring scripts (outside git)
 ├── ship-logs.sh                 # Log shipping to B2
@@ -169,17 +168,28 @@ All containers have health checks configured:
 ### First Deployment on New Instance
 1. Run `setup-lightsail.sh` to install Docker
 2. GitHub Actions will:
-   - Clone repository to `/opt/mizual`
-   - Create `.env` from Parameter Store
+   - Create `/opt/mizual` directory
+   - Transfer `.env` from Parameter Store via SCP
+   - Transfer `docker-compose.zero-downtime.yml` via SCP
+   - Transfer Docker image and load it
    - Start registry and watchtower
    - Deploy all containers
 
+**Note**: No git repository needed on server - all code runs from Docker images
+
 ### Subsequent Deployments
 1. Push to `dev` or `main` branch
-2. GitHub Actions builds and transfers image
-3. Image pushed to local registry
-4. Watchtower detects and updates containers
-5. Zero downtime throughout
+2. GitHub Actions builds Docker image
+3. Transfers image to server via SCP
+4. Updates `.env` from Parameter Store if needed
+5. Image pushed to local registry with `:latest` tag
+6. Watchtower detects and performs rolling update
+7. Zero downtime throughout
+
+**Files transferred each deployment**:
+- Docker image (tar.gz)
+- `.env` file (always fresh from Parameter Store)
+- `docker-compose.zero-downtime.yml` (if changed)
 
 ### Manual Deployment Commands
 ```bash
@@ -220,43 +230,35 @@ docker-compose -f docker-compose.zero-downtime.yml restart backend
 
 ## Common Issues & Solutions
 
-### SOLVED: .env file missing on fresh instance deployment
-**Cause**: Multiple issues in deployment workflow:
+### SOLVED: Git Conflicts and .env File Issues
+**Original Problems**:
 1. Directory `/opt/mizual` doesn't exist when SCP tries to copy .env
 2. Git clone operations were deleting the .env file after it was copied
-3. Deployment scenario detection was checking for ANY mizual container instead of APPLICATION containers
-4. Syntax error in bash arithmetic causing incorrect scenario detection
+3. Deployment scenario detection had syntax errors
+4. Git conflicts when force-pushing squashed commits
 
-**Root Problem**: On fresh instances, the workflow would:
-- Create .env from Parameter Store on GitHub runner
-- Try to SCP to `/opt/mizual/.env` (might fail if directory doesn't exist)
-- Clone git repo which would delete the .env file
-- Registry/watchtower start but no application containers could run without .env
-- Bash syntax error with `grep -c` output causing deployment to fail
+**Final Solution (IMPLEMENTED & VERIFIED)**: 
+**Removed git operations entirely from server**
+- No git clone or pull on server - code runs from Docker images
+- Only transfer required files via SCP: `.env`, `docker-compose.zero-downtime.yml`
+- Eliminated all git-related conflicts permanently
 
-**Solution (IMPLEMENTED & VERIFIED)**: 
-1. Ensure `/opt/mizual` exists before SCP with error handling
-2. Preserve .env file during git operations (no longer delete it)
-3. Check specifically for backend/celery containers, not registry/watchtower
-4. Fixed bash syntax error in container detection logic
-5. Add verification that .env exists before Docker operations
+**Benefits**:
+- No git conflicts ever
+- Simpler and faster deployments
+- Cleaner separation between build (GitHub) and runtime (server)
+- Only transfers what's needed
 
-**Final Working Implementation**:
+**Current Implementation (Git-Free)**:
 ```bash
-# Before SCP, ensure directory exists
+# Ensure directory exists
 ssh "sudo mkdir -p /opt/mizual && sudo chown ubuntu:ubuntu /opt/mizual" || exit 1
+
+# Transfer only required files via SCP
 scp .env user@host:/opt/mizual/.env || exit 1
+scp docker-compose.zero-downtime.yml user@host:/opt/mizual/ || exit 1
 
-# During git clone, preserve .env
-if [ -f /opt/mizual/.env ]; then
-  cp /opt/mizual/.env /tmp/.env.backup
-fi
-# ... git clone ...
-if [ -f /tmp/.env.backup ]; then
-  cp /tmp/.env.backup /opt/mizual/.env
-fi
-
-# Fixed detection logic - check APPLICATION containers only (no syntax errors)
+# Container detection logic (unchanged)
 BACKEND_EXISTS=$(docker ps -a --format "{{.Names}}" | grep -c "^mizual-backend$" || true)
 CELERY_EXISTS=$(docker ps -a --format "{{.Names}}" | grep -c "^mizual-celery$" || true)
 BACKEND_EXISTS=${BACKEND_EXISTS:-0}
@@ -265,8 +267,9 @@ APP_CONTAINERS_EXIST=$((BACKEND_EXISTS + CELERY_EXISTS))
 ```
 
 **Verification**: Successfully tested on both:
-- Fresh Lightsail instance (first deployment)
+- Fresh Lightsail instance (first deployment) 
 - Existing instance (zero-downtime update)
+- No git operations needed on server
 
 ### Issue: CURRENT_VERSION exists as directory
 **Cause**: Docker creates it as directory if file doesn't exist
@@ -356,10 +359,12 @@ grep mizual /var/log/syslog
 5. Verify deployment via /version endpoint
 
 **Important Configuration**:
-- Uses Parameter Store for environment variables
+- Uses Parameter Store for environment variables (single source of truth)
 - Never overwrites existing Parameter Store values
-- Handles existing `/opt/mizual` directory
+- No git operations on server (git-free deployment)
+- Transfers only `.env` and `docker-compose.zero-downtime.yml` via SCP
 - Creates CURRENT_VERSION file before Docker
+- All code runs from Docker images
 
 ### GitHub Secrets Required
 ```
