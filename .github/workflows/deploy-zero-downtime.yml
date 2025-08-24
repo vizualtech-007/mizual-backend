@@ -180,11 +180,25 @@ jobs:
             
             # Ensure monitoring scripts exist (one-time setup or after fresh deployment)
             echo "Checking monitoring setup..."
-            if [ ! -f /opt/mizual-monitoring/ship-logs.sh ] || ! (crontab -l 2>/dev/null | grep -q "/opt/mizual-monitoring/ship-logs.sh"); then
+            # Check both ubuntu and root crontabs for the monitoring jobs
+            CRON_EXISTS=false
+            if crontab -l 2>/dev/null | grep -q "/opt/mizual-monitoring/ship-logs.sh"; then
+              CRON_EXISTS=true
+              echo "Cron jobs found in ubuntu user crontab"
+            elif sudo crontab -l 2>/dev/null | grep -q "/opt/mizual-monitoring/ship-logs.sh"; then
+              CRON_EXISTS=true
+              echo "Cron jobs found in root crontab"
+            fi
+            
+            if [ ! -f /opt/mizual-monitoring/ship-logs.sh ] || [ "$CRON_EXISTS" = "false" ]; then
               echo "Monitoring scripts or cron jobs missing, running setup..."
               if [ -f /opt/mizual/lightsail-setup/setup-monitoring.sh ]; then
-                sudo bash /opt/mizual/lightsail-setup/setup-monitoring.sh
+                # Run as ubuntu user to ensure cron jobs are added to ubuntu's crontab
+                bash /opt/mizual/lightsail-setup/setup-monitoring.sh
                 echo "Monitoring scripts and cron jobs configured successfully"
+                # Verify cron was added
+                echo "Verifying cron jobs:"
+                crontab -l | grep mizual-monitoring || echo "WARNING: Cron jobs not found after setup!"
               else
                 echo "Warning: setup-monitoring.sh not found, monitoring will not be configured"
               fi
@@ -297,6 +311,22 @@ jobs:
               
               echo "Images pushed and verified! Watchtower will detect and update containers within 1 minute."
               echo "Current time: $(date)"
+            fi
+            
+            # CRITICAL: Ensure :latest tags exist in registry for Watchtower
+            echo "Final verification of :latest tags in registry..."
+            BACKEND_HAS_LATEST=$(curl -s http://localhost:5000/v2/mizual-backend/tags/list | grep -c '"latest"' || echo "0")
+            CELERY_HAS_LATEST=$(curl -s http://localhost:5000/v2/mizual-celery/tags/list | grep -c '"latest"' || echo "0")
+            
+            if [ "$BACKEND_HAS_LATEST" = "0" ] || [ "$CELERY_HAS_LATEST" = "0" ]; then
+              echo "WARNING: Missing :latest tags, pushing them now..."
+              docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:latest
+              docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:latest
+              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+              docker push localhost:5000/mizual-celery:latest
+              echo "Latest tags pushed successfully!"
+            else
+              echo "✓ Both :latest tags confirmed in registry"
             fi
             
             # Clean up old images from registry (keep only latest 5 versions)
