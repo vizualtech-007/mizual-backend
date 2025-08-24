@@ -480,8 +480,11 @@ jobs:
             
             # Detect deployment scenario and handle accordingly
             # Check if APPLICATION containers exist (not counting registry/watchtower)
-            BACKEND_EXISTS=$(docker ps -a | grep -c mizual-backend || echo "0")
-            CELERY_EXISTS=$(docker ps -a | grep -c mizual-celery || echo "0")
+            BACKEND_EXISTS=$(docker ps -a --format "{{.Names}}" | grep -c "^mizual-backend$" || true)
+            CELERY_EXISTS=$(docker ps -a --format "{{.Names}}" | grep -c "^mizual-celery$" || true)
+            # Ensure we have valid numbers (default to 0 if empty)
+            BACKEND_EXISTS=${BACKEND_EXISTS:-0}
+            CELERY_EXISTS=${CELERY_EXISTS:-0}
             APP_CONTAINERS_EXIST=$((BACKEND_EXISTS + CELERY_EXISTS))
             
             if [ "$APP_CONTAINERS_EXIST" -eq "0" ]; then

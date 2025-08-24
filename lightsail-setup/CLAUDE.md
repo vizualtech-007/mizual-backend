@@ -219,6 +219,45 @@ docker-compose -f docker-compose.zero-downtime.yml restart backend
 
 ## Common Issues & Solutions
 
+### Issue: .env file missing on fresh instance deployment
+**Cause**: Multiple issues in deployment workflow:
+1. Directory `/opt/mizual` doesn't exist when SCP tries to copy .env
+2. Git clone operations were deleting the .env file after it was copied
+3. Deployment scenario detection was checking for ANY mizual container instead of APPLICATION containers
+
+**Root Problem**: On fresh instances, the workflow would:
+- Create .env from Parameter Store on GitHub runner
+- Try to SCP to `/opt/mizual/.env` (might fail if directory doesn't exist)
+- Clone git repo which would delete the .env file
+- Registry/watchtower start but no application containers could run without .env
+
+**Solution**: 
+1. Ensure `/opt/mizual` exists before SCP with error handling
+2. Preserve .env file during git operations (no longer delete it)
+3. Check specifically for backend/celery containers, not registry/watchtower
+4. Add verification that .env exists before Docker operations
+
+**Key Workflow Fixes**:
+```bash
+# Before SCP, ensure directory exists
+ssh "sudo mkdir -p /opt/mizual && sudo chown ubuntu:ubuntu /opt/mizual" || exit 1
+scp .env user@host:/opt/mizual/.env || exit 1
+
+# During git clone, preserve .env
+if [ -f /opt/mizual/.env ]; then
+  cp /opt/mizual/.env /tmp/.env.backup
+fi
+# ... git clone ...
+if [ -f /tmp/.env.backup ]; then
+  cp /tmp/.env.backup /opt/mizual/.env
+fi
+
+# Detection logic - check APPLICATION containers only
+BACKEND_EXISTS=$(docker ps -a | grep -c mizual-backend || echo "0")
+CELERY_EXISTS=$(docker ps -a | grep -c mizual-celery || echo "0")
+APP_CONTAINERS_EXIST=$((BACKEND_EXISTS + CELERY_EXISTS))
+```
+
 ### Issue: CURRENT_VERSION exists as directory
 **Cause**: Docker creates it as directory if file doesn't exist
 **Solution**: GitHub Actions now creates file before Docker starts
