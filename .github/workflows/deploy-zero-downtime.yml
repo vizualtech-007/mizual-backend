@@ -253,10 +253,48 @@ jobs:
             
             # CRITICAL: Push ALL tags to registry immediately after tagging
             echo "Pushing all tags to registry..."
+            
+            # Check if registry is running first
+            if ! docker ps | grep -q mizual-registry; then
+              echo "ERROR: Registry is not running! Cannot push images."
+              echo "Starting registry..."
+              cd /opt/mizual
+              docker-compose -f docker-compose.zero-downtime.yml up -d registry
+              sleep 10
+            fi
+            
+            # Push with verification
+            echo "Pushing backend version tag..."
             docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }} || { echo "ERROR: Failed to push backend version tag"; exit 1; }
+            
+            echo "Pushing backend:latest tag..."
             docker push localhost:5000/mizual-backend:latest || { echo "ERROR: Failed to push backend:latest"; exit 1; }
+            
+            echo "Pushing celery version tag..."
             docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }} || { echo "ERROR: Failed to push celery version tag"; exit 1; }
+            
+            echo "Pushing celery:latest tag..."
             docker push localhost:5000/mizual-celery:latest || { echo "ERROR: Failed to push celery:latest"; exit 1; }
+            
+            # Verify the tags actually made it to the registry
+            echo "Verifying pushed tags in registry..."
+            sleep 2
+            
+            if ! curl -s http://localhost:5000/v2/mizual-backend/tags/list | grep -q '"latest"'; then
+              echo "ERROR: backend:latest not found in registry after push!"
+              echo "Registry tags:"
+              curl -s http://localhost:5000/v2/mizual-backend/tags/list
+              exit 1
+            fi
+            
+            if ! curl -s http://localhost:5000/v2/mizual-celery/tags/list | grep -q '"latest"'; then
+              echo "ERROR: celery:latest not found in registry after push!"
+              echo "Registry tags:"
+              curl -s http://localhost:5000/v2/mizual-celery/tags/list
+              exit 1
+            fi
+            
+            echo "✓ All tags successfully pushed and verified in registry"
             
             # Ensure latest tags always exist in registry (failsafe)
             echo "Failsafe: Ensuring latest tags exist in registry..."
