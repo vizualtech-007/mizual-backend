@@ -124,6 +124,7 @@ fi
 # 5. Create monitoring scripts directory (outside Git repo)
 echo "Creating monitoring scripts directory..."
 sudo mkdir -p /opt/mizual-monitoring
+sudo chown ubuntu:ubuntu /opt/mizual-monitoring
 
 # Create log shipping script
 echo "Creating log shipping script..."
@@ -215,10 +216,20 @@ fi
 EOF
 
 sudo chmod +x /opt/mizual-monitoring/ship-logs.sh
+sudo chown ubuntu:ubuntu /opt/mizual-monitoring/ship-logs.sh
 
 # 6. Add cron job for log shipping (every 30 minutes)
 echo "Setting up cron job for log shipping..."
-(crontab -l 2>/dev/null || echo "") | grep -v ship-logs | (cat; echo "*/30 * * * * /opt/mizual-monitoring/ship-logs.sh >> /var/log/mizual-log-shipping.log 2>&1") | crontab -
+# Remove any existing entries first (both old and new paths)
+(crontab -l 2>/dev/null || echo "") | grep -v -E "ship-logs|check-alerts" > /tmp/cron_temp
+# Add new entries
+echo "*/30 * * * * /opt/mizual-monitoring/ship-logs.sh >> /var/log/mizual-log-shipping.log 2>&1" >> /tmp/cron_temp
+echo "*/5 * * * * /opt/mizual-monitoring/check-alerts.sh >> /var/log/mizual-alerts-cron.log 2>&1" >> /tmp/cron_temp
+# Install the new crontab
+cat /tmp/cron_temp | crontab -
+rm /tmp/cron_temp
+echo "Cron jobs added. Current crontab:"
+crontab -l
 
 # 7. Setup AWS credentials for log shipping (root user)
 echo "Configuring AWS credentials for root user..."
@@ -318,6 +329,7 @@ echo "================================================"
 EOF
 
 sudo chmod +x /opt/mizual-monitoring/check-metrics.sh
+sudo chown ubuntu:ubuntu /opt/mizual-monitoring/check-metrics.sh
 
 # 9. Set up alert thresholds notification script
 echo "Creating alert notification script..."
@@ -362,9 +374,9 @@ fi
 EOF
 
 sudo chmod +x /opt/mizual-monitoring/check-alerts.sh
+sudo chown ubuntu:ubuntu /opt/mizual-monitoring/check-alerts.sh
 
-# Add cron job for alert checking (every 5 minutes)
-(crontab -l 2>/dev/null || echo "") | grep -v check-alerts | (cat; echo "*/5 * * * * /opt/mizual-monitoring/check-alerts.sh") | crontab -
+# Cron job for alert checking already added above with log shipping
 
 # 10. Install systemd service for monitoring persistence
 echo "Installing systemd service for monitoring..."
