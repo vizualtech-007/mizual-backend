@@ -286,6 +286,21 @@ jobs:
             fi
             
             echo "=== End monitoring check ==="
+            
+            # Ensure CURRENT_VERSION file exists before any Docker operations
+            # This prevents Docker from creating it as a directory when mounting
+            if [ -d /opt/mizual/CURRENT_VERSION ]; then
+              echo "ERROR: CURRENT_VERSION exists as a directory, removing it..."
+              rm -rf /opt/mizual/CURRENT_VERSION
+            fi
+            
+            if [ ! -f /opt/mizual/CURRENT_VERSION ]; then
+              echo "Creating initial CURRENT_VERSION file to prevent Docker from creating it as directory..."
+              echo "initial-deployment" > /opt/mizual/CURRENT_VERSION
+              echo "Commit: pending" >> /opt/mizual/CURRENT_VERSION
+              echo "Deployed: $(date)" >> /opt/mizual/CURRENT_VERSION
+              echo "Branch: ${{ github.ref_name }}" >> /opt/mizual/CURRENT_VERSION
+            fi
           ENDSSH
       
       - name: Load and Push Docker Images
@@ -641,6 +656,13 @@ jobs:
             
             # Only update version file if containers are confirmed updated
             if [ "$CONTAINERS_UPDATED" = "true" ]; then
+              # Check if CURRENT_VERSION exists as a directory and remove it
+              if [ -d /opt/mizual/CURRENT_VERSION ]; then
+                echo "WARNING: CURRENT_VERSION exists as a directory, removing it..."
+                rm -rf /opt/mizual/CURRENT_VERSION
+              fi
+              
+              # Create the version file
               echo "${{ steps.set-env.outputs.IMAGE_TAG }}" > /opt/mizual/CURRENT_VERSION
               echo "Commit: ${{ github.sha }}" >> /opt/mizual/CURRENT_VERSION
               echo "Deployed: $(date)" >> /opt/mizual/CURRENT_VERSION
