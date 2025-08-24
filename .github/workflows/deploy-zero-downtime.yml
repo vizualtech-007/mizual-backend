@@ -121,10 +121,10 @@ jobs:
           echo "Environment file created with $(wc -l < .env) variables"
           
           # Ensure /opt/mizual directory exists before copying .env
-          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "sudo mkdir -p /opt/mizual && sudo chown ubuntu:ubuntu /opt/mizual"
+          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "sudo mkdir -p /opt/mizual && sudo chown ubuntu:ubuntu /opt/mizual" || { echo "ERROR: Failed to create /opt/mizual directory"; exit 1; }
           
-          # Copy to server
-          scp -i ~/.ssh/deploy_key .env ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:/opt/mizual/.env
+          # Copy to server (this MUST succeed or deployment will fail)
+          scp -i ~/.ssh/deploy_key .env ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:/opt/mizual/.env || { echo "ERROR: Failed to copy .env file to server"; exit 1; }
           
       - name: Setup and Update Repository
         run: |
@@ -140,10 +140,9 @@ jobs:
                 echo "Directory /opt/mizual exists but is not a git repository"
                 echo "Backing up any existing files..."
                 
-                # Remove old .env file - we'll get fresh one from Parameter Store
+                # Keep the .env file that was just copied from Parameter Store
                 if [ -f /opt/mizual/.env ]; then
-                  echo "Removing old .env file (will be replaced with fresh one from Parameter Store)"
-                  rm /opt/mizual/.env
+                  echo "Preserving .env file from Parameter Store"
                 fi
                 
                 if [ -d /opt/mizual/registry-data ]; then
@@ -176,11 +175,25 @@ jobs:
               else
                 # Directory doesn't exist, create and clone
                 echo "Creating /opt/mizual directory..."
+                
+                # Save .env if it was already copied
+                if [ -f /opt/mizual/.env ]; then
+                  echo "Saving existing .env file before git clone..."
+                  cp /opt/mizual/.env /tmp/.env.backup
+                fi
+                
                 sudo mkdir -p /opt/mizual
                 sudo chown ubuntu:ubuntu /opt/mizual
                 cd /opt/mizual
                 git clone https://github.com/vizualtech-007/mizual-backend.git .
                 git checkout ${{ github.ref_name }}
+                
+                # Restore .env file if it existed
+                if [ -f /tmp/.env.backup ]; then
+                  echo "Restoring .env file from Parameter Store..."
+                  cp /tmp/.env.backup /opt/mizual/.env
+                  rm /tmp/.env.backup
+                fi
               fi
             else
               echo "Updating existing repository..."
@@ -292,6 +305,15 @@ jobs:
             
             echo "=== End monitoring check ==="
             
+            # CRITICAL: Verify .env file exists before proceeding
+            if [ ! -f /opt/mizual/.env ]; then
+              echo "ERROR: .env file not found at /opt/mizual/.env"
+              echo "This should have been created from Parameter Store in previous step"
+              ls -la /opt/mizual/
+              exit 1
+            fi
+            echo "✓ .env file exists with $(wc -l < /opt/mizual/.env) variables"
+            
             # Ensure CURRENT_VERSION file exists before any Docker operations
             # This prevents Docker from creating it as a directory when mounting
             if [ -d /opt/mizual/CURRENT_VERSION ]; then
@@ -351,6 +373,12 @@ jobs:
             # Check if registry is running first
             if ! docker ps | grep -q mizual-registry; then
               echo "Registry is not running! Starting registry and watchtower..."
+              # Ensure directory exists and docker-compose file is present
+              if [ ! -f /opt/mizual/docker-compose.zero-downtime.yml ]; then
+                echo "ERROR: docker-compose.zero-downtime.yml not found at /opt/mizual/"
+                echo "This should have been set up in the previous step"
+                exit 1
+              fi
               cd /opt/mizual
               docker-compose -f docker-compose.zero-downtime.yml up -d registry watchtower
               sleep 10
@@ -607,7 +635,7 @@ jobs:
               
               # Wait for Watchtower to update the containers
               echo "Monitoring Watchtower update progress..."
-              MAX_WAIT=180  # Maximum 3 minutes wait (increased from 2)
+              MAX_WAIT=120  # Maximum 2 minutes wait
               WAIT_TIME=0
               UPDATE_COMPLETE=false
               
@@ -842,8 +870,8 @@ jobs:
           echo "Waiting for Watchtower to detect and deploy new image..."
           echo "Expected deployment version: ${{ steps.set-env.outputs.IMAGE_TAG }}"
           
-          # Wait up to 4 minutes (Watchtower polls every 1 minute + buffer)
-          max_attempts=16  # 16 attempts * 15 seconds = 4 minutes
+          # Wait up to 2 minutes (Watchtower polls every 1 minute + buffer)
+          max_attempts=8  # 8 attempts * 15 seconds = 2 minutes
           attempt=0
           
           while [ $attempt -lt $max_attempts ]; do
@@ -887,7 +915,7 @@ jobs:
             fi
           done
           
-          echo "TIMEOUT: Deployment verification failed after 4 minutes"
+          echo "TIMEOUT: Deployment verification failed after 2 minutes"
           echo "This could mean:"
           echo "1. Watchtower hasn't detected the new image yet (wait longer - polls every 1 minute)"
           echo "2. There's an issue with the new image"
