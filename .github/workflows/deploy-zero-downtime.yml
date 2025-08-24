@@ -350,11 +350,11 @@ jobs:
             
             # Check if registry is running first
             if ! docker ps | grep -q mizual-registry; then
-              echo "ERROR: Registry is not running! Cannot push images."
-              echo "Starting registry..."
+              echo "Registry is not running! Starting registry and watchtower..."
               cd /opt/mizual
-              docker-compose -f docker-compose.zero-downtime.yml up -d registry
+              docker-compose -f docker-compose.zero-downtime.yml up -d registry watchtower
               sleep 10
+              echo "Registry and watchtower started"
             fi
             
             # IMPORTANT: Delete old :latest manifest from registry to force update
@@ -451,11 +451,13 @@ jobs:
             set -e
             
             # Detect deployment scenario and handle accordingly
-            # Check if any mizual containers exist (running or stopped)
-            CONTAINERS_EXIST=$(docker ps -a | grep -c mizual || echo "0")
+            # Check if APPLICATION containers exist (not counting registry/watchtower)
+            BACKEND_EXISTS=$(docker ps -a | grep -c mizual-backend || echo "0")
+            CELERY_EXISTS=$(docker ps -a | grep -c mizual-celery || echo "0")
+            APP_CONTAINERS_EXIST=$((BACKEND_EXISTS + CELERY_EXISTS))
             
-            if [ "$CONTAINERS_EXIST" -eq "0" ]; then
-              echo "SCENARIO: First deployment (no containers exist) - Starting all services..."
+            if [ "$APP_CONTAINERS_EXIST" -eq "0" ]; then
+              echo "SCENARIO: First deployment (no application containers exist) - Starting all services..."
               cd /opt/mizual
               
               # Verify .env file exists
@@ -467,19 +469,37 @@ jobs:
               
               echo ".env file exists with $(wc -l < /opt/mizual/.env) lines"
               
-              # Start registry and watchtower (registry-data dir created by setup script)
-              docker-compose -f docker-compose.zero-downtime.yml up -d registry watchtower
-              sleep 10  # Wait for registry to be ready
+              # Start registry and watchtower if not already running
+              # (They may have been started in the Push to Registry step)
+              if ! docker ps | grep -q mizual-registry; then
+                echo "Starting registry..."
+                docker-compose -f docker-compose.zero-downtime.yml up -d registry
+                sleep 10  # Wait for registry to be ready
+              else
+                echo "Registry already running"
+              fi
+              
+              if ! docker ps | grep -q mizual-watchtower; then
+                echo "Starting watchtower..."
+                docker-compose -f docker-compose.zero-downtime.yml up -d watchtower
+                sleep 5
+              else
+                echo "Watchtower already running"
+              fi
               
               # Test registry is working
               curl -f http://localhost:5000/v2/ || (echo "Registry not responding!" && exit 1)
               
-              # Push images to registry
-              echo "Pushing images to local registry..."
-              docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
-              docker push localhost:5000/mizual-backend:latest
-              docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
-              docker push localhost:5000/mizual-celery:latest
+              # Check if images are already in registry (from Push to Registry step)
+              if curl -s http://localhost:5000/v2/mizual-backend/tags/list | grep -q '"latest"'; then
+                echo "Images already in registry from previous step"
+              else
+                echo "Pushing images to local registry..."
+                docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
+                docker push localhost:5000/mizual-backend:latest
+                docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
+                docker push localhost:5000/mizual-celery:latest
+              fi
               
               # Start all application services
               docker-compose -f docker-compose.zero-downtime.yml up -d
