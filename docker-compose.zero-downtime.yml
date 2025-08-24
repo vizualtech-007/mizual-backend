@@ -178,47 +178,8 @@ services:
       retries: 3
       start_period: 30s
 
-  monitoring:
-    image: netdata/netdata:stable
-    container_name: mizual-netdata
-    restart: unless-stopped
-    ports:
-      - "8081:19999"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /etc/passwd:/host/etc/passwd:ro
-      - /etc/group:/host/etc/group:ro
-      - /etc/localtime:/etc/localtime:ro
-      - ./netdata-alerts.conf:/etc/netdata/health.d/mizual.conf:ro
-    environment:
-      - TZ=Asia/Kolkata
-      - DOCKER_HOST=unix:///var/run/docker.sock
-      # Minimize memory usage but keep alerts
-      - NETDATA_DISABLE_CLOUD=yes
-      - DISABLE_TELEMETRY=1
-      - NETDATA_MEMORY_MODE=save
-      - NETDATA_UPDATE_EVERY=2
-      - NETDATA_HEALTH_ENABLED=yes
-    cap_add:
-      - SYS_PTRACE
-    security_opt:
-      - apparmor:unconfined
-    networks:
-      - mizual-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:19999/api/v1/info"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    deploy:
-      resources:
-        limits:
-          memory: 50M
-        reservations:
-          memory: 40M
+  # Monitoring removed - using UptimeRobot for external monitoring
+  # and /opt/mizual-monitoring/check-alerts.sh for internal alerts
 
 volumes:
   redis_data:

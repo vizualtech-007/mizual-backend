@@ -178,6 +178,20 @@ jobs:
               fi
             fi
             
+            # Ensure monitoring scripts exist (one-time setup or after fresh deployment)
+            echo "Checking monitoring setup..."
+            if [ ! -f /opt/mizual-monitoring/ship-logs.sh ]; then
+              echo "Monitoring scripts missing, running setup..."
+              if [ -f /opt/mizual/lightsail-setup/setup-monitoring.sh ]; then
+                sudo bash /opt/mizual/lightsail-setup/setup-monitoring.sh
+                echo "Monitoring scripts created successfully"
+              else
+                echo "Warning: setup-monitoring.sh not found, monitoring will not be configured"
+              fi
+            else
+              echo "Monitoring scripts already exist in /opt/mizual-monitoring/"
+            fi
+            
             # Load the Docker image
             echo "Loading Docker image..."
             docker load < ~/mizual-image.tar.gz

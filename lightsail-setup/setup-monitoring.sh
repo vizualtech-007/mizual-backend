@@ -121,9 +121,13 @@ else
     echo "AWS CLI already installed"
 fi
 
-# 5. Create log shipping script
+# 5. Create monitoring scripts directory (outside Git repo)
+echo "Creating monitoring scripts directory..."
+sudo mkdir -p /opt/mizual-monitoring
+
+# Create log shipping script
 echo "Creating log shipping script..."
-sudo tee /opt/mizual/ship-logs.sh > /dev/null <<'EOF'
+sudo tee /opt/mizual-monitoring/ship-logs.sh > /dev/null <<'EOF'
 #!/bin/bash
 
 # Ship Docker logs to Backblaze B2
@@ -210,11 +214,11 @@ if [ $(date +%H) -eq 0 ]; then
 fi
 EOF
 
-sudo chmod +x /opt/mizual/ship-logs.sh
+sudo chmod +x /opt/mizual-monitoring/ship-logs.sh
 
 # 6. Add cron job for log shipping (every 30 minutes)
 echo "Setting up cron job for log shipping..."
-(crontab -l 2>/dev/null || echo "") | grep -v ship-logs | (cat; echo "*/30 * * * * /opt/mizual/ship-logs.sh >> /var/log/mizual-log-shipping.log 2>&1") | crontab -
+(crontab -l 2>/dev/null || echo "") | grep -v ship-logs | (cat; echo "*/30 * * * * /opt/mizual-monitoring/ship-logs.sh >> /var/log/mizual-log-shipping.log 2>&1") | crontab -
 
 # 7. Setup AWS credentials for log shipping (root user)
 echo "Configuring AWS credentials for root user..."
@@ -270,7 +274,7 @@ fi
 
 # 8. Create monitoring dashboard script
 echo "Creating monitoring dashboard script..."
-sudo tee /opt/mizual/check-metrics.sh > /dev/null <<'EOF'
+sudo tee /opt/mizual-monitoring/check-metrics.sh > /dev/null <<'EOF'
 #!/bin/bash
 
 echo "================================================"
@@ -308,16 +312,16 @@ docker logs mizual-backend --tail 5 2>&1 | grep -E "ERROR|CRITICAL" || echo "No 
 echo ""
 echo "================================================"
 echo "For detailed logs: docker logs [container-name]"
-echo "For live metrics: watch -n 5 /opt/mizual/check-metrics.sh"
+echo "For live metrics: watch -n 5 /opt/mizual-monitoring/check-metrics.sh"
 echo "CloudWatch metrics available in AWS Lightsail console"
 echo "================================================"
 EOF
 
-sudo chmod +x /opt/mizual/check-metrics.sh
+sudo chmod +x /opt/mizual-monitoring/check-metrics.sh
 
 # 9. Set up alert thresholds notification script
 echo "Creating alert notification script..."
-sudo tee /opt/mizual/check-alerts.sh > /dev/null <<'EOF'
+sudo tee /opt/mizual-monitoring/check-alerts.sh > /dev/null <<'EOF'
 #!/bin/bash
 
 # Check system thresholds and log warnings
@@ -357,10 +361,10 @@ if [ -f $ALERT_LOG ] && [ $(stat -c%s "$ALERT_LOG") -gt 10485760 ]; then
 fi
 EOF
 
-sudo chmod +x /opt/mizual/check-alerts.sh
+sudo chmod +x /opt/mizual-monitoring/check-alerts.sh
 
 # Add cron job for alert checking (every 5 minutes)
-(crontab -l 2>/dev/null || echo "") | grep -v check-alerts | (cat; echo "*/5 * * * * /opt/mizual/check-alerts.sh") | crontab -
+(crontab -l 2>/dev/null || echo "") | grep -v check-alerts | (cat; echo "*/5 * * * * /opt/mizual-monitoring/check-alerts.sh") | crontab -
 
 # 10. Install systemd service for monitoring persistence
 echo "Installing systemd service for monitoring..."
@@ -379,7 +383,7 @@ echo "================================================"
 echo ""
 echo "Available monitoring tools:"
 echo "1. CloudWatch metrics: View in AWS Lightsail console"
-echo "2. Live metrics: /opt/mizual/check-metrics.sh"
+echo "2. Live metrics: /opt/mizual-monitoring/check-metrics.sh"
 echo "3. Container logs: docker logs [container-name]"
 echo "4. Dozzle web UI: http://[server-ip]:8080"
 echo "5. cAdvisor web UI: http://[server-ip]:8081"
