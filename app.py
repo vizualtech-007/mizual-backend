@@ -111,7 +111,7 @@ def startup_event():
 @app.head("/health")
 def health_check():
     """Health check endpoint for monitoring and load balancers"""
-    return {"status": "ok", "message": "Service is running"}
+    return {"status": "ok", "message": "Service is running 2"}
 
 @app.get("/version")
 def version_info():
