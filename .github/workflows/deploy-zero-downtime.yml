@@ -126,184 +126,34 @@ jobs:
           # Copy to server (this MUST succeed or deployment will fail)
           scp -i ~/.ssh/deploy_key .env ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:/opt/mizual/.env || { echo "ERROR: Failed to copy .env file to server"; exit 1; }
           
-      - name: Setup and Update Repository
+          # Copy docker-compose file to server
+          scp -i ~/.ssh/deploy_key docker-compose.zero-downtime.yml ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:/opt/mizual/docker-compose.zero-downtime.yml || { echo "ERROR: Failed to copy docker-compose file to server"; exit 1; }
+          
+      - name: Setup Server Environment
         run: |
           ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
             set -e
             
-            # Check if this is first deployment or if directory exists but is not a git repo
-            if [ ! -d /opt/mizual/.git ]; then
-              echo "First deployment detected. Setting up repository..."
-              
-              # Check if directory exists but is not a git repo
-              if [ -d /opt/mizual ]; then
-                echo "Directory /opt/mizual exists but is not a git repository"
-                echo "Backing up any existing files..."
-                
-                # Keep the .env file that was just copied from Parameter Store
-                if [ -f /opt/mizual/.env ]; then
-                  echo "Preserving .env file from Parameter Store"
-                fi
-                
-                if [ -d /opt/mizual/registry-data ]; then
-                  echo "Registry data directory exists and will be preserved"
-                fi
-                
-                # Create a temporary directory for git clone
-                echo "Cloning repository to temporary location..."
-                cd /tmp
-                rm -rf mizual-temp
-                git clone https://github.com/vizualtech-007/mizual-backend.git mizual-temp
-                cd mizual-temp
-                git checkout ${{ github.ref_name }}
-                
-                # Copy git repo content to /opt/mizual
-                echo "Moving repository content to /opt/mizual..."
-                cp -r .git /opt/mizual/
-                cp -r * /opt/mizual/ 2>/dev/null || true
-                cp -r .* /opt/mizual/ 2>/dev/null || true
-                
-                # Clean up temp directory
-                cd /
-                rm -rf /tmp/mizual-temp
-                
-                # Ensure we have the fresh .env from Parameter Store (already SCPed earlier)
-                echo ".env file will be created fresh from Parameter Store"
-                
-                cd /opt/mizual
-                echo "Repository initialized in existing directory"
-              else
-                # Directory doesn't exist, create and clone
-                echo "Creating /opt/mizual directory..."
-                
-                # Save .env if it was already copied
-                if [ -f /opt/mizual/.env ]; then
-                  echo "Saving existing .env file before git clone..."
-                  cp /opt/mizual/.env /tmp/.env.backup
-                fi
-                
-                sudo mkdir -p /opt/mizual
-                sudo chown ubuntu:ubuntu /opt/mizual
-                cd /opt/mizual
-                git clone https://github.com/vizualtech-007/mizual-backend.git .
-                git checkout ${{ github.ref_name }}
-                
-                # Restore .env file if it existed
-                if [ -f /tmp/.env.backup ]; then
-                  echo "Restoring .env file from Parameter Store..."
-                  cp /tmp/.env.backup /opt/mizual/.env
-                  rm /tmp/.env.backup
-                fi
-              fi
-            else
-              echo "Updating existing repository..."
-              cd /opt/mizual
-              git fetch origin
-              git checkout ${{ github.ref_name }}
-              
-              # Handle potential conflicts with modified and untracked files
-              if ! git pull origin ${{ github.ref_name }}; then
-                echo "Git pull failed, likely due to local changes. Backing up and retrying..."
-                
-                # Back up any modified or untracked files
-                mkdir -p /tmp/mizual-backup
-                
-                # Handle modified files (M status)
-                git status --porcelain | grep '^ M' | cut -c4- | while read file; do
-                  if [ -f "$file" ]; then
-                    echo "Backing up modified file: $file"
-                    cp "$file" "/tmp/mizual-backup/$(basename $file).modified.backup" || true
-                  fi
-                done
-                
-                # Handle untracked files (?? status)
-                git status --porcelain | grep '^??' | cut -c4- | while read file; do
-                  if [ -f "$file" ]; then
-                    echo "Backing up untracked file: $file"
-                    cp "$file" "/tmp/mizual-backup/$(basename $file).untracked.backup" || true
-                  fi
-                done
-                
-                # Reset any local changes (this will discard modified files)
-                echo "Resetting local changes..."
-                git reset --hard HEAD
-                
-                # Remove untracked files (but skip registry-data)
-                git status --porcelain | grep '^??' | cut -c4- | while read file; do
-                  # Skip registry-data directory to avoid permission errors
-                  if [[ "$file" != registry-data* ]]; then
-                    echo "Removing untracked file: $file"
-                    rm -f "$file" || true
-                  fi
-                done
-                
-                # Now retry the pull
-                git pull origin ${{ github.ref_name }}
-                
-                echo "Repository updated successfully after handling conflicts"
-              fi
+            # No git operations needed - we use Docker images and SCP files
+            echo "Setting up server environment..."
+            
+            # Ensure directory structure exists
+            if [ ! -d /opt/mizual ]; then
+              echo "Creating /opt/mizual directory..."
+              sudo mkdir -p /opt/mizual
+              sudo chown ubuntu:ubuntu /opt/mizual
             fi
             
-            # Ensure monitoring scripts exist (one-time setup or after fresh deployment)
-            echo "=== Checking monitoring setup ==="
-            
-            # Check if monitoring scripts exist
-            SCRIPTS_EXIST=false
-            if [ -f /opt/mizual-monitoring/ship-logs.sh ] && [ -f /opt/mizual-monitoring/check-alerts.sh ]; then
-              SCRIPTS_EXIST=true
-              echo "✓ Monitoring scripts found"
+            # Ensure registry data directory exists and is preserved
+            if [ ! -d /opt/mizual/registry-data ]; then
+              echo "Creating registry-data directory for Docker registry persistence..."
+              mkdir -p /opt/mizual/registry-data
             else
-              echo "✗ Monitoring scripts missing"
+              echo "Registry data directory exists and will be preserved"
             fi
             
-            # Check if cron jobs exist (in ubuntu user's crontab)
-            CRON_EXISTS=false
-            if crontab -l 2>/dev/null | grep -q "/opt/mizual-monitoring/ship-logs.sh"; then
-              CRON_EXISTS=true
-              echo "✓ Cron jobs found in ubuntu user crontab"
-            else
-              echo "✗ Cron jobs missing from ubuntu user crontab"
-            fi
-            
-            # If either scripts or cron are missing, run setup
-            if [ "$SCRIPTS_EXIST" = "false" ] || [ "$CRON_EXISTS" = "false" ]; then
-              echo "Running monitoring setup to fix missing components..."
-              if [ -f /opt/mizual/lightsail-setup/setup-monitoring.sh ]; then
-                # Run setup script (it handles permissions correctly)
-                bash /opt/mizual/lightsail-setup/setup-monitoring.sh
-                
-                # Verify setup was successful
-                echo "=== Verification after setup ==="
-                if [ -f /opt/mizual-monitoring/ship-logs.sh ]; then
-                  echo "✓ ship-logs.sh created"
-                else
-                  echo "✗ ship-logs.sh NOT created - setup may have failed"
-                fi
-                
-                if [ -f /opt/mizual-monitoring/check-alerts.sh ]; then
-                  echo "✓ check-alerts.sh created"
-                else
-                  echo "✗ check-alerts.sh NOT created - setup may have failed"
-                fi
-                
-                if crontab -l 2>/dev/null | grep -q "/opt/mizual-monitoring/ship-logs.sh"; then
-                  echo "✓ Cron jobs successfully added"
-                  echo "Current cron jobs:"
-                  crontab -l | grep mizual-monitoring
-                else
-                  echo "✗ CRITICAL: Cron jobs NOT added - monitoring will not work!"
-                fi
-              else
-                echo "ERROR: setup-monitoring.sh not found at /opt/mizual/lightsail-setup/"
-                echo "Monitoring will not be configured!"
-              fi
-            else
-              echo "✓ Monitoring already fully configured"
-              echo "Current cron jobs:"
-              crontab -l | grep mizual-monitoring
-            fi
-            
-            echo "=== End monitoring check ==="
+            # Note: Monitoring setup will be skipped since we don't have git repo with setup scripts
+            # Monitoring can be set up manually if needed by running setup-monitoring.sh
             
             # CRITICAL: Verify .env file exists before proceeding
             if [ ! -f /opt/mizual/.env ]; then

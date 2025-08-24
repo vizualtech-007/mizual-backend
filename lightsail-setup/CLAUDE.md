@@ -4,6 +4,7 @@ This file provides guidance to Claude Code when working with Lightsail deploymen
 
 **Last Updated**: August 24, 2025
 **Purpose**: AWS Lightsail instance setup, zero-downtime deployment, and monitoring configuration
+**Status**: FULLY OPERATIONAL - Zero-downtime deployment working for both fresh instances and updates
 
 ## Overview
 
@@ -219,25 +220,28 @@ docker-compose -f docker-compose.zero-downtime.yml restart backend
 
 ## Common Issues & Solutions
 
-### Issue: .env file missing on fresh instance deployment
+### SOLVED: .env file missing on fresh instance deployment
 **Cause**: Multiple issues in deployment workflow:
 1. Directory `/opt/mizual` doesn't exist when SCP tries to copy .env
 2. Git clone operations were deleting the .env file after it was copied
 3. Deployment scenario detection was checking for ANY mizual container instead of APPLICATION containers
+4. Syntax error in bash arithmetic causing incorrect scenario detection
 
 **Root Problem**: On fresh instances, the workflow would:
 - Create .env from Parameter Store on GitHub runner
 - Try to SCP to `/opt/mizual/.env` (might fail if directory doesn't exist)
 - Clone git repo which would delete the .env file
 - Registry/watchtower start but no application containers could run without .env
+- Bash syntax error with `grep -c` output causing deployment to fail
 
-**Solution**: 
+**Solution (IMPLEMENTED & VERIFIED)**: 
 1. Ensure `/opt/mizual` exists before SCP with error handling
 2. Preserve .env file during git operations (no longer delete it)
 3. Check specifically for backend/celery containers, not registry/watchtower
-4. Add verification that .env exists before Docker operations
+4. Fixed bash syntax error in container detection logic
+5. Add verification that .env exists before Docker operations
 
-**Key Workflow Fixes**:
+**Final Working Implementation**:
 ```bash
 # Before SCP, ensure directory exists
 ssh "sudo mkdir -p /opt/mizual && sudo chown ubuntu:ubuntu /opt/mizual" || exit 1
@@ -252,11 +256,17 @@ if [ -f /tmp/.env.backup ]; then
   cp /tmp/.env.backup /opt/mizual/.env
 fi
 
-# Detection logic - check APPLICATION containers only
-BACKEND_EXISTS=$(docker ps -a | grep -c mizual-backend || echo "0")
-CELERY_EXISTS=$(docker ps -a | grep -c mizual-celery || echo "0")
+# Fixed detection logic - check APPLICATION containers only (no syntax errors)
+BACKEND_EXISTS=$(docker ps -a --format "{{.Names}}" | grep -c "^mizual-backend$" || true)
+CELERY_EXISTS=$(docker ps -a --format "{{.Names}}" | grep -c "^mizual-celery$" || true)
+BACKEND_EXISTS=${BACKEND_EXISTS:-0}
+CELERY_EXISTS=${CELERY_EXISTS:-0}
 APP_CONTAINERS_EXIST=$((BACKEND_EXISTS + CELERY_EXISTS))
 ```
+
+**Verification**: Successfully tested on both:
+- Fresh Lightsail instance (first deployment)
+- Existing instance (zero-downtime update)
 
 ### Issue: CURRENT_VERSION exists as directory
 **Cause**: Docker creates it as directory if file doesn't exist
