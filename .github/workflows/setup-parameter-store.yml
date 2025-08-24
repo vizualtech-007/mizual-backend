@@ -2,8 +2,6 @@ name: Setup AWS Parameter Store from GitHub Secrets
 
 on:
   workflow_dispatch:  # Manual trigger only
-#  push:
-#    branches: [dev, main]  # Temporary: allow running from any branch
 
 jobs:
   setup-parameter-store:
