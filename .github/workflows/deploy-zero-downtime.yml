@@ -491,8 +491,21 @@ jobs:
             
             # Verify latest tags still exist after cleanup
             echo "Verifying latest tags after cleanup:"
-            echo "Backend latest tag exists:" $(curl -s http://localhost:5000/v2/mizual-backend/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); print('latest' in data.get('tags',[]))" || echo "false")
-            echo "Celery latest tag exists:" $(curl -s http://localhost:5000/v2/mizual-celery/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); print('latest' in data.get('tags',[]))" || echo "false")
+            BACKEND_HAS_LATEST=$(curl -s http://localhost:5000/v2/mizual-backend/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); print('latest' in data.get('tags',[]))" || echo "False")
+            CELERY_HAS_LATEST=$(curl -s http://localhost:5000/v2/mizual-celery/tags/list | python3 -c "import sys,json; data=json.load(sys.stdin); print('latest' in data.get('tags',[]))" || echo "False")
+            
+            echo "Backend latest tag exists: $BACKEND_HAS_LATEST"
+            echo "Celery latest tag exists: $CELERY_HAS_LATEST"
+            
+            # CRITICAL: Fail if latest tags are missing
+            if [ "$BACKEND_HAS_LATEST" != "True" ] || [ "$CELERY_HAS_LATEST" != "True" ]; then
+              echo "================================================"
+              echo "DEPLOYMENT FAILED!"
+              echo "ERROR: :latest tags are missing from registry!"
+              echo "This will prevent Watchtower from working."
+              echo "================================================"
+              exit 1
+            fi
             
             # Log current deployment version
             echo "================================================"
