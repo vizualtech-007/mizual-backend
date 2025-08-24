@@ -13,26 +13,11 @@ RUN apk add --no-cache --virtual .build-deps \
     vips-dev \
     pkgconfig
 
-# Create optimized requirements (remove heavy packages if possible)
-COPY requirements.txt requirements-original.txt
+# Copy and use actual requirements.txt
+COPY requirements.txt .
 
-# Create slim requirements - remove or replace heavy packages
-RUN echo "fastapi==0.111.0" > requirements-slim.txt && \
-    echo "uvicorn[standard]==0.29.0" >> requirements-slim.txt && \
-    echo "python-multipart==0.0.9" >> requirements-slim.txt && \
-    echo "psycopg[binary]==3.2.9" >> requirements-slim.txt && \
-    echo "httpx==0.27.0" >> requirements-slim.txt && \
-    echo "redis==5.0.4" >> requirements-slim.txt && \
-    echo "celery==5.4.0" >> requirements-slim.txt && \
-    echo "slowapi==0.1.9" >> requirements-slim.txt && \
-    echo "python-dotenv==1.0.1" >> requirements-slim.txt && \
-    echo "psutil==5.9.8" >> requirements-slim.txt && \
-    echo "pyvips==2.2.3" >> requirements-slim.txt && \
-    echo "boto3==1.34.108" >> requirements-slim.txt && \
-    echo "google-generativeai==0.5.4" >> requirements-slim.txt
-
-# Install minimal Python packages
-RUN pip install --no-cache-dir --prefix=/install -r requirements-slim.txt
+# Install Python packages from actual requirements
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # Remove .pyc files and unnecessary files to save space
 RUN find /install -name "*.pyc" -delete && \

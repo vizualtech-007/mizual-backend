@@ -9,12 +9,20 @@ services:
     ports:
       - "127.0.0.1:5000:5000"  # Only accessible from localhost
     volumes:
-      - ./registry-data:/var/lib/registry
+      - /opt/mizual/registry-data:/var/lib/registry
     environment:
-      REGISTRY_STORAGE_DELETE_ENABLED: "true"
-      REGISTRY_HTTP_SECRET: ${REGISTRY_SECRET:-defaultsecret}  # Change this in production
+      - TZ=Asia/Kolkata
+      - REGISTRY_STORAGE_DELETE_ENABLED=true
+      - REGISTRY_HTTP_SECRET=${REGISTRY_SECRET:-defaultsecret}
+      - REGISTRY_HTTP_HEADERS_X-Content-Type-Options=[nosniff]
     networks:
       - mizual-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/v2/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -30,7 +38,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - WATCHTOWER_POLL_INTERVAL=300  # Check every 5 minutes
+      - TZ=Asia/Kolkata
+      - WATCHTOWER_POLL_INTERVAL=60   # Check every 1 minute (for testing)
       - WATCHTOWER_CLEANUP=true       # Remove old images
       - WATCHTOWER_ROLLING_RESTART=true  # Zero-downtime updates
       - WATCHTOWER_INCLUDE_STOPPED=false
@@ -41,19 +50,27 @@ services:
       - WATCHTOWER_LABEL_ENABLE=true  # Only watch containers with label
     networks:
       - mizual-network
+    healthcheck:
+      test: ["CMD", "/watchtower", "--health-check"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     deploy:
       resources:
         limits:
           memory: 20M
         reservations:
           memory: 10M
-    command: --interval 300
+    command: --interval 60
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
       - redis_data:/data
+    environment:
+      - TZ=Asia/Kolkata
     command: redis-server --appendonly yes --maxmemory 200mb --maxmemory-policy allkeys-lru
     networks:
       - mizual-network
@@ -62,9 +79,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
 
   migration:
-    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    image: localhost:5000/mizual-backend:latest
     environment:
       - TZ=Asia/Kolkata
     env_file:
@@ -75,7 +93,7 @@ services:
     restart: "no"
 
   backend:
-    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    image: localhost:5000/mizual-backend:latest
     container_name: mizual-backend
     platform: linux/amd64
     restart: unless-stopped
@@ -90,6 +108,8 @@ services:
       - TZ=Asia/Kolkata
     env_file:
       - .env
+    volumes:
+      - /opt/mizual/CURRENT_VERSION:/opt/mizual/CURRENT_VERSION:ro
     networks:
       - mizual-network
     command: gunicorn -w 2 -k uvicorn.workers.UvicornWorker app:app --bind 0.0.0.0:8000
@@ -109,7 +129,7 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"  # Enable watchtower monitoring
 
   celery:
-    image: localhost:5000/mizual-backend:${IMAGE_TAG:-latest}
+    image: localhost:5000/mizual-celery:latest
     container_name: mizual-celery
     restart: unless-stopped
     depends_on:
@@ -147,26 +167,19 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
+      - TZ=Asia/Kolkata
       - DOZZLE_NO_ANALYTICS=true
     networks:
       - mizual-network
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
-  monitoring:
-    image: gcr.io/cadvisor/cadvisor:latest
-    restart: unless-stopped
-    ports:
-      - "8081:8080"
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
-    privileged: true
-    devices:
-      - /dev/kmsg
-    networks:
-      - mizual-network
+  # Monitoring removed - using UptimeRobot for external monitoring
+  # and /opt/mizual-monitoring/check-alerts.sh for internal alerts
 
 volumes:
   redis_data:

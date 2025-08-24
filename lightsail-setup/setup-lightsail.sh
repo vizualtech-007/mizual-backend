@@ -6,9 +6,15 @@
 
 set -e  # Exit on any error
 
+# Set non-interactive mode for entire script
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
+YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
 print_status() {
@@ -19,24 +25,37 @@ print_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
 print_status "Setting up Mizual Lightsail instance in us-east-2"
 print_status "=================================================="
 
-# 1. Update system
-print_status "Updating system packages..."
-sudo apt update && sudo apt upgrade -y
-print_success "System updated"
+# Disable needrestart completely
+print_status "Disabling interactive prompts..."
+sudo mkdir -p /etc/needrestart
+echo '$nrconf{restart} = "a";' | sudo tee /etc/needrestart/needrestart.conf > /dev/null
+echo '$nrconf{kernelhints} = -1;' | sudo tee -a /etc/needrestart/needrestart.conf > /dev/null
+
+# 1. Update package lists (skip upgrade to avoid SSH config conflicts)
+print_status "Updating package lists..."
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq
+print_success "Package lists updated"
 
 # 2. Install essential packages (minimal set)
 print_status "Installing essential packages..."
-sudo apt install -y curl git htop ufw
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl git htop ufw \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    -o DPkg::Options::="--force-confnew"
 print_success "Essential packages installed"
 
 # 3. Install Docker
 print_status "Installing Docker..."
 if ! command -v docker &> /dev/null; then
     curl -fsSL https://get.docker.com -o get-docker.sh
-    sudo sh get-docker.sh
+    sudo DEBIAN_FRONTEND=noninteractive sh get-docker.sh
     rm get-docker.sh
     print_success "Docker installed"
 else
@@ -78,6 +97,12 @@ sudo mkdir -p /opt/mizual
 sudo chown ubuntu:ubuntu /opt/mizual
 print_success "Application directory created"
 
+# 8a. Create registry data directory for zero-downtime deployments
+print_status "Creating registry data directory..."
+sudo mkdir -p /opt/mizual/registry-data
+sudo chown ubuntu:ubuntu /opt/mizual/registry-data
+print_success "Registry directory created for zero-downtime deployments"
+
 # 9. Setup directory structure
 print_status "Setting up directory structure..."
 cd /opt/mizual
@@ -102,5 +127,15 @@ echo "1. Your environment files are managed by GitHub Actions"
 echo "2. Update GitHub secrets with this server IP: $(curl -s ifconfig.me)"
 echo "3. Logout and login again to apply docker group membership"
 echo "4. Test deployment by pushing to dev/main branch"
+
+# 11. Setup monitoring and log shipping
+print_status "Setting up monitoring and log shipping..."
+if [ -f /opt/mizual/lightsail-setup/setup-monitoring.sh ]; then
+    bash /opt/mizual/lightsail-setup/setup-monitoring.sh
+    print_success "Monitoring and log shipping configured"
+else
+    print_warning "Monitoring setup script not found. Run manually later with:"
+    echo "   bash /opt/mizual/lightsail-setup/setup-monitoring.sh"
+fi
 
 print_status "Run 'newgrp docker' or logout/login to use docker without sudo"

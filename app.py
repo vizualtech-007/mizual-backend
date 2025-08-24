@@ -10,6 +10,7 @@ from src import schemas, s3, tasks, db_raw, cache
 import uuid
 import base64
 import os
+from datetime import datetime
 from src.logger import logger
 
 # Rate limiting configuration from environment variables
@@ -110,7 +111,54 @@ def startup_event():
 @app.head("/health")
 def health_check():
     """Health check endpoint for monitoring and load balancers"""
-    return {"status": "ok", "message": "Service is running"}
+    return {"status": "ok", "message": "Service is running 2"}
+
+@app.get("/version")
+def version_info():
+    """Version endpoint showing deployment information"""
+    try:
+        version_data = {
+            "environment": ENVIRONMENT,
+            "api_version": "1.0.0",
+            "git_commit": None,
+            "deployed_at": None,
+            "version_tag": None
+        }
+        
+        # Try to read version from CURRENT_VERSION file (set by GitHub Actions)
+        try:
+            with open("/opt/mizual/CURRENT_VERSION", "r") as f:
+                version_content = f.read().strip().split('\n')
+                if version_content:
+                    # First line is the version tag
+                    version_data["version_tag"] = version_content[0]
+                    
+                    # Parse additional info from subsequent lines
+                    for line in version_content[1:]:
+                        if line.startswith("Commit: "):
+                            version_data["git_commit"] = line.replace("Commit: ", "")
+                        elif line.startswith("Deployed: "):
+                            version_data["deployed_at"] = line.replace("Deployed: ", "")
+        except FileNotFoundError:
+            # No version file available - this is expected for local development
+            logger.info("CURRENT_VERSION file not found - likely running in local development")
+        
+        # If we still don't have deploy time, use current time
+        if not version_data["deployed_at"]:
+            version_data["deployed_at"] = datetime.utcnow().isoformat() + "Z"
+            
+        return version_data
+        
+    except Exception as e:
+        logger.warning(f"Failed to get version info: {str(e)}")
+        return {
+            "environment": ENVIRONMENT,
+            "api_version": "1.0.0",
+            "git_commit": None,
+            "deployed_at": None,
+            "version_tag": None,
+            "error": "Version information unavailable"
+        }
 
 @app.get("/health/celery")
 @limiter.limit("10/minute")
