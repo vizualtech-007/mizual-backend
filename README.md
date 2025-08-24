@@ -794,4 +794,3 @@ The system is designed as a containerized, distributed application leveraging Do
 *   **Asynchronous Processing:** The use of Celery and Redis offloads long-running image processing tasks from the main API thread, improving API responsiveness and user experience.
 *   **External API Dependency:** The system relies on the external BFL AI API for the core image editing functionality. Robust error handling and retry mechanisms are implemented in the worker to manage potential API failures.
 *   **Environment Configuration:** Environment variables are used for sensitive information (API keys, database credentials) and configurable parameters (S3 bucket names, API URLs), promoting flexibility and security.
-
