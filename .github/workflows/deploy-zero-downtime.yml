@@ -337,11 +337,28 @@ jobs:
               sleep 10
             fi
             
+            # IMPORTANT: Delete old :latest manifest from registry to force update
+            echo "Removing old :latest tags from registry to ensure clean update..."
+            # Get the digest of current :latest and delete it
+            OLD_BACKEND_DIGEST=$(curl -s -I -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              http://localhost:5000/v2/mizual-backend/manifests/latest | grep Docker-Content-Digest | awk '{print $2}' | tr -d '\r')
+            if [ ! -z "$OLD_BACKEND_DIGEST" ]; then
+              echo "Deleting old backend:latest manifest: $OLD_BACKEND_DIGEST"
+              curl -X DELETE http://localhost:5000/v2/mizual-backend/manifests/$OLD_BACKEND_DIGEST 2>/dev/null || true
+            fi
+            
+            OLD_CELERY_DIGEST=$(curl -s -I -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              http://localhost:5000/v2/mizual-celery/manifests/latest | grep Docker-Content-Digest | awk '{print $2}' | tr -d '\r')
+            if [ ! -z "$OLD_CELERY_DIGEST" ]; then
+              echo "Deleting old celery:latest manifest: $OLD_CELERY_DIGEST"
+              curl -X DELETE http://localhost:5000/v2/mizual-celery/manifests/$OLD_CELERY_DIGEST 2>/dev/null || true
+            fi
+            
             # Push with verification
             echo "Pushing backend version tag..."
             docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }} || { echo "ERROR: Failed to push backend version tag"; exit 1; }
             
-            echo "Pushing backend:latest tag..."
+            echo "Pushing backend:latest tag (force update)..."
             docker push localhost:5000/mizual-backend:latest || { echo "ERROR: Failed to push backend:latest"; exit 1; }
             
             echo "Pushing celery version tag..."
@@ -489,6 +506,24 @@ jobs:
                 docker-compose -f docker-compose.zero-downtime.yml up -d watchtower
                 sleep 5
               fi
+              
+              # Verify the registry actually has the new images
+              echo "Verifying registry has updated :latest tags..."
+              
+              # Pull fresh from registry to verify
+              docker rmi localhost:5000/mizual-backend:latest 2>/dev/null || true
+              docker rmi localhost:5000/mizual-celery:latest 2>/dev/null || true
+              
+              echo "Pulling fresh :latest images from registry..."
+              docker pull localhost:5000/mizual-backend:latest
+              docker pull localhost:5000/mizual-celery:latest
+              
+              # Check the IDs of what we pulled
+              REGISTRY_BACKEND_ID=$(docker inspect localhost:5000/mizual-backend:latest --format='{{.Id}}' | cut -d: -f2 | cut -c1-12)
+              REGISTRY_CELERY_ID=$(docker inspect localhost:5000/mizual-celery:latest --format='{{.Id}}' | cut -d: -f2 | cut -c1-12)
+              
+              echo "Registry backend :latest ID: $REGISTRY_BACKEND_ID"
+              echo "Registry celery :latest ID: $REGISTRY_CELERY_ID"
               
               # Force Watchtower to check now (send SIGUSR1 signal)
               if docker ps | grep -q mizual-watchtower; then
