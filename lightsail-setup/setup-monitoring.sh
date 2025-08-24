@@ -14,110 +14,13 @@ echo "================================================"
 echo "Setting up Monitoring & Log Persistence"
 echo "================================================"
 
-# 1. Install CloudWatch Agent (OS detection)
-echo "Installing CloudWatch Agent..."
-
-# Detect OS
-if command -v yum &> /dev/null; then
-    OS="amazon-linux"
-elif command -v apt &> /dev/null; then
-    OS="ubuntu"
-else
-    echo "Unsupported OS. This script supports Amazon Linux and Ubuntu."
-    exit 1
-fi
-
-if ! command -v amazon-cloudwatch-agent &> /dev/null; then
-    if [ "$OS" = "amazon-linux" ]; then
-        echo "Installing on Amazon Linux..."
-        sudo yum install -y amazon-cloudwatch-agent
-    elif [ "$OS" = "ubuntu" ]; then
-        echo "Installing on Ubuntu..."
-        wget -q https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
-        sudo DEBIAN_FRONTEND=noninteractive dpkg -i amazon-cloudwatch-agent.deb
-        rm -f amazon-cloudwatch-agent.deb
-    fi
-    echo "CloudWatch Agent installed successfully"
-else
-    echo "CloudWatch Agent already installed"
-fi
-
-# 2. Create CloudWatch configuration
-echo "Creating CloudWatch configuration..."
-sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null <<'EOF'
-{
-  "agent": {
-    "metrics_collection_interval": 60,
-    "run_as_user": "root"
-  },
-  "metrics": {
-    "namespace": "Mizual",
-    "metrics_collected": {
-      "cpu": {
-        "measurement": [
-          {
-            "name": "cpu_usage_idle",
-            "rename": "CPU_IDLE",
-            "unit": "Percent"
-          },
-          "cpu_usage_iowait"
-        ],
-        "metrics_collection_interval": 60,
-        "cpu_per_core": false,
-        "totalcpu": true
-      },
-      "disk": {
-        "measurement": [
-          {
-            "name": "disk_used_percent",
-            "rename": "DISK_USED",
-            "unit": "Percent"
-          },
-          "disk_free"
-        ],
-        "metrics_collection_interval": 60,
-        "resources": [
-          "/"
-        ]
-      },
-      "mem": {
-        "measurement": [
-          {
-            "name": "mem_used_percent",
-            "rename": "MEM_USED",
-            "unit": "Percent"
-          },
-          "mem_available"
-        ],
-        "metrics_collection_interval": 60
-      },
-      "netstat": {
-        "measurement": [
-          {
-            "name": "tcp_established",
-            "rename": "TCP_CONN",
-            "unit": "Count"
-          }
-        ],
-        "metrics_collection_interval": 60
-      }
-    }
-  }
-}
-EOF
-
-# 3. Start CloudWatch Agent
-echo "Starting CloudWatch Agent..."
-sudo systemctl start amazon-cloudwatch-agent
-sudo systemctl enable amazon-cloudwatch-agent
-echo "CloudWatch Agent started and enabled"
-
-# 4. Install AWS CLI if not present (for log shipping)
+# 1. Install AWS CLI if not present (for log shipping)
 if ! command -v aws &> /dev/null; then
     echo "Installing AWS CLI..."
-    if [ "$OS" = "amazon-linux" ]; then
+    # Detect OS
+    if command -v yum &> /dev/null; then
         sudo yum install -y aws-cli
-    elif [ "$OS" = "ubuntu" ]; then
+    elif command -v apt &> /dev/null; then
         sudo apt-get update -qq
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq awscli -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
     fi
@@ -126,7 +29,7 @@ else
     echo "AWS CLI already installed"
 fi
 
-# 5. Create monitoring scripts directory (outside Git repo)
+# 2. Create monitoring scripts directory (outside Git repo)
 echo "Creating monitoring scripts directory..."
 sudo mkdir -p /opt/mizual-monitoring
 sudo chown ubuntu:ubuntu /opt/mizual-monitoring
@@ -223,7 +126,7 @@ EOF
 sudo chmod +x /opt/mizual-monitoring/ship-logs.sh
 sudo chown ubuntu:ubuntu /opt/mizual-monitoring/ship-logs.sh
 
-# 6. Add cron job for log shipping (every 30 minutes)
+# 3. Add cron job for log shipping (every 30 minutes)
 echo "Setting up cron job for log shipping..."
 # Remove any existing entries first (both old and new paths)
 (crontab -l 2>/dev/null || echo "") | grep -v -E "ship-logs|check-alerts" > /tmp/cron_temp
@@ -236,7 +139,7 @@ rm /tmp/cron_temp
 echo "Cron jobs added. Current crontab:"
 crontab -l
 
-# 7. Setup AWS credentials for log shipping (root user)
+# 4. Setup AWS credentials for log shipping (root user)
 echo "Configuring AWS credentials for root user..."
 
 # Extract S3 credentials from .env file
@@ -288,7 +191,7 @@ else
     echo "Log shipping requires S3 credentials in .env file"
 fi
 
-# 8. Create monitoring dashboard script
+# 5. Create monitoring dashboard script
 echo "Creating monitoring dashboard script..."
 sudo tee /opt/mizual-monitoring/check-metrics.sh > /dev/null <<'EOF'
 #!/bin/bash
@@ -336,7 +239,7 @@ EOF
 sudo chmod +x /opt/mizual-monitoring/check-metrics.sh
 sudo chown ubuntu:ubuntu /opt/mizual-monitoring/check-metrics.sh
 
-# 9. Set up alert thresholds notification script
+# 6. Set up alert thresholds notification script
 echo "Creating alert notification script..."
 sudo tee /opt/mizual-monitoring/check-alerts.sh > /dev/null <<'EOF'
 #!/bin/bash
@@ -383,7 +286,7 @@ sudo chown ubuntu:ubuntu /opt/mizual-monitoring/check-alerts.sh
 
 # Cron job for alert checking already added above with log shipping
 
-# 10. Install systemd service for monitoring persistence
+# 7. Install systemd service for monitoring persistence
 echo "Installing systemd service for monitoring..."
 if [ -f /opt/mizual/lightsail-setup/mizual-monitoring.service ]; then
     sudo cp /opt/mizual/lightsail-setup/mizual-monitoring.service /etc/systemd/system/
@@ -399,21 +302,16 @@ echo "Monitoring Setup Complete!"
 echo "================================================"
 echo ""
 echo "Available monitoring tools:"
-echo "1. CloudWatch metrics: View in AWS Lightsail console"
-echo "2. Live metrics: /opt/mizual-monitoring/check-metrics.sh"
-echo "3. Container logs: docker logs [container-name]"
-echo "4. Dozzle web UI: http://[server-ip]:8080"
-echo "5. cAdvisor web UI: http://[server-ip]:8081"
-echo "6. Alert log: /var/log/mizual-alerts.log"
+echo "1. Live metrics: /opt/mizual-monitoring/check-metrics.sh"
+echo "2. Container logs: docker logs [container-name]"
+echo "3. Dozzle web UI: http://[server-ip]:8080"
+echo "4. Alert log: /var/log/mizual-alerts.log"
 echo ""
 echo "Log shipping to Backblaze B2:"
 echo "- Runs every 30 minutes via cron"
 echo "- Stores in s3://mizual-images/logs/[env]/[hostname]/[date]/"
 echo "- Container-specific logs (backend, celery, registry, watchtower)"
 echo "- Retains logs for 90 days in B2"
-echo ""
-echo "To configure CloudWatch alarms:"
-echo "Go to AWS Lightsail > Your Instance > Monitoring > Create Alarm"
 echo ""
 echo "IMPORTANT: Log shipping uses existing S3 credentials from .env:"
 echo "- S3_BUCKET_NAME (same bucket as images)"

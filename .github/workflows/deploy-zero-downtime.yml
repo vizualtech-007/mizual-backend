@@ -83,33 +83,18 @@ jobs:
             echo "${param_name}=${value}" >> .env
           done
           
-          # Add environment-specific fixed parameters
+          # Add environment-specific parameters ONLY if not present
           if [[ "${{ steps.set-env.outputs.USING_PROD }}" == "true" ]]; then
-            echo "DATABASE_SCHEMA=public" >> .env
-            echo "STORAGE_PATH_PREFIX=production" >> .env
+            grep -q "^DATABASE_SCHEMA=" .env || echo "DATABASE_SCHEMA=public" >> .env
+            grep -q "^STORAGE_PATH_PREFIX=" .env || echo "STORAGE_PATH_PREFIX=production" >> .env
           else
-            echo "DATABASE_SCHEMA=preview" >> .env
-            echo "STORAGE_PATH_PREFIX=preview" >> .env
+            grep -q "^DATABASE_SCHEMA=" .env || echo "DATABASE_SCHEMA=preview" >> .env
+            grep -q "^STORAGE_PATH_PREFIX=" .env || echo "STORAGE_PATH_PREFIX=preview" >> .env
           fi
           
-          # Add fixed parameters that don't change between environments
-          echo "LOG_LEVEL=INFO" >> .env
-          echo "CELERY_BROKER_URL=redis://localhost:6379/0" >> .env
-          echo "CELERY_RESULT_BACKEND=redis://localhost:6379/0" >> .env
-          echo "MAX_WORKERS=3" >> .env
-          echo "CELERY_CONCURRENCY=3" >> .env
-          echo "CELERY_WORKER_MEMORY_LIMIT=600MB" >> .env
-          echo "LLM_PROVIDER=gemini" >> .env
-          echo "LLM_MODEL=gemini-1.5-flash" >> .env
-          echo "ENABLE_PROMPT_ENHANCEMENT=true" >> .env
-          echo "RATE_LIMIT_BURST_SECONDS=10" >> .env
-          echo "RATE_LIMIT_STATUS_CHECKS_PER_MINUTE=30" >> .env
-          echo "MAX_CHAIN_LENGTH=5" >> .env
-          echo "UNSUPPORTED_IMAGE_TYPES=heic,avif,gif" >> .env
-          
-          # Set LLM_API_KEY to same as GEMINI_API_KEY
-          GEMINI_KEY=$(grep "^GEMINI_API_KEY=" .env | cut -d'=' -f2-)
-          if [ ! -z "$GEMINI_KEY" ]; then
+          # Copy GEMINI_API_KEY to LLM_API_KEY if needed
+          if grep -q "^GEMINI_API_KEY=" .env && ! grep -q "^LLM_API_KEY=" .env; then
+            GEMINI_KEY=$(grep "^GEMINI_API_KEY=" .env | cut -d'=' -f2-)
             echo "LLM_API_KEY=$GEMINI_KEY" >> .env
           fi
           
