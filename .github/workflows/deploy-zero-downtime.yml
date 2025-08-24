@@ -297,6 +297,14 @@ jobs:
             echo "Loading Docker image..."
             docker load < ~/mizual-image.tar.gz
             
+            # List loaded images to verify
+            echo "Loaded images:"
+            docker images | grep -E "mizual-backend|${{ env.IMAGE_NAME }}" | head -5
+            
+            # Get the image ID of what we just loaded
+            LOADED_IMAGE_ID=$(docker inspect ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} --format='{{.Id}}' | cut -d: -f2 | cut -c1-12)
+            echo "Loaded image ID: $LOADED_IMAGE_ID"
+            
             # Tag for local registry (backend and celery use same image)
             echo "Tagging images for registry..."
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }} || { echo "ERROR: Failed to tag backend with version"; exit 1; }
@@ -304,6 +312,18 @@ jobs:
             # Celery uses the same image as backend, just different registry name
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }} || { echo "ERROR: Failed to tag celery with version"; exit 1; }
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:latest || { echo "ERROR: Failed to tag celery as latest"; exit 1; }
+            
+            # Verify the :latest tags point to the new image
+            echo "Verifying :latest tags point to new image..."
+            BACKEND_LATEST_ID=$(docker inspect localhost:5000/mizual-backend:latest --format='{{.Id}}' | cut -d: -f2 | cut -c1-12)
+            CELERY_LATEST_ID=$(docker inspect localhost:5000/mizual-celery:latest --format='{{.Id}}' | cut -d: -f2 | cut -c1-12)
+            echo "Backend :latest ID: $BACKEND_LATEST_ID"
+            echo "Celery :latest ID: $CELERY_LATEST_ID"
+            
+            if [ "$BACKEND_LATEST_ID" != "$LOADED_IMAGE_ID" ] || [ "$CELERY_LATEST_ID" != "$LOADED_IMAGE_ID" ]; then
+              echo "ERROR: :latest tags don't point to the loaded image!"
+              exit 1
+            fi
             
             # CRITICAL: Push ALL tags to registry immediately after tagging
             echo "Pushing all tags to registry..."
@@ -349,6 +369,20 @@ jobs:
             fi
             
             echo "✓ All tags successfully pushed and verified in registry"
+            
+            # Verify the pushed images in registry have the correct digest
+            echo "Getting registry image digests..."
+            REGISTRY_BACKEND_DIGEST=$(curl -s -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              http://localhost:5000/v2/mizual-backend/manifests/latest 2>/dev/null | \
+              python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('config',{}).get('digest','')[:19])" 2>/dev/null || echo "unknown")
+            
+            REGISTRY_CELERY_DIGEST=$(curl -s -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              http://localhost:5000/v2/mizual-celery/manifests/latest 2>/dev/null | \
+              python3 -c "import sys,json; data=json.load(sys.stdin); print(data.get('config',{}).get('digest','')[:19])" 2>/dev/null || echo "unknown")
+            
+            echo "Registry backend digest: $REGISTRY_BACKEND_DIGEST"
+            echo "Registry celery digest: $REGISTRY_CELERY_DIGEST"
+            echo "Expected digest prefix: sha256:$LOADED_IMAGE_ID"
             
             # Ensure latest tags always exist in registry (failsafe)
             echo "Failsafe: Ensuring latest tags exist in registry..."
@@ -465,9 +499,19 @@ jobs:
               echo "Images pushed! Waiting for Watchtower to update containers..."
               echo "Current time: $(date)"
               
+              # Get the expected image ID that was just pushed
+              EXPECTED_IMAGE_ID=$(docker inspect localhost:5000/mizual-backend:latest --format='{{.Id}}' | cut -d: -f2 | cut -c1-12)
+              echo "Expected image ID after update: $EXPECTED_IMAGE_ID"
+              
+              # Get current container image IDs before update
+              CURRENT_BACKEND_ID=$(docker inspect mizual-backend --format='{{.Image}}' | cut -d: -f2 | cut -c1-12)
+              CURRENT_CELERY_ID=$(docker inspect mizual-celery --format='{{.Image}}' | cut -d: -f2 | cut -c1-12)
+              echo "Current backend container ID: $CURRENT_BACKEND_ID"
+              echo "Current celery container ID: $CURRENT_CELERY_ID"
+              
               # Wait for Watchtower to update the containers
               echo "Monitoring Watchtower update progress..."
-              MAX_WAIT=120  # Maximum 2 minutes wait
+              MAX_WAIT=180  # Maximum 3 minutes wait (increased from 2)
               WAIT_TIME=0
               UPDATE_COMPLETE=false
               
@@ -479,9 +523,12 @@ jobs:
                 if [ "$BACKEND_IMAGE" = "localhost:5000/mizual-backend:latest" ] && [ "$CELERY_IMAGE" = "localhost:5000/mizual-celery:latest" ]; then
                   # Check if the actual image ID matches what we just pushed
                   BACKEND_ID=$(docker inspect mizual-backend --format='{{.Image}}' | cut -d: -f2 | cut -c1-12)
-                  EXPECTED_ID=$(docker inspect localhost:5000/mizual-backend:latest --format='{{.Id}}' | cut -d: -f2 | cut -c1-12)
+                  CELERY_ID=$(docker inspect mizual-celery --format='{{.Image}}' | cut -d: -f2 | cut -c1-12)
                   
-                  if [ "$BACKEND_ID" = "$EXPECTED_ID" ]; then
+                  echo "  Current backend ID: $BACKEND_ID (expecting $EXPECTED_IMAGE_ID)"
+                  echo "  Current celery ID: $CELERY_ID (expecting $EXPECTED_IMAGE_ID)"
+                  
+                  if [ "$BACKEND_ID" = "$EXPECTED_IMAGE_ID" ] && [ "$CELERY_ID" = "$EXPECTED_IMAGE_ID" ]; then
                     UPDATE_COMPLETE=true
                     echo "✓ Watchtower successfully updated containers!"
                     break
@@ -489,6 +536,13 @@ jobs:
                 fi
                 
                 echo "  Waiting for Watchtower to update... ($WAIT_TIME/$MAX_WAIT seconds)"
+                
+                # Check Watchtower logs for any errors
+                if [ $((WAIT_TIME % 30)) -eq 0 ] && [ $WAIT_TIME -gt 0 ]; then
+                  echo "  Recent Watchtower activity:"
+                  docker logs mizual-watchtower --tail 3 2>&1 | grep -E "Scanned|Updated|Error" || echo "    No recent activity"
+                fi
+                
                 sleep 10
                 WAIT_TIME=$((WAIT_TIME + 10))
               done
@@ -692,8 +746,8 @@ jobs:
           echo "Waiting for Watchtower to detect and deploy new image..."
           echo "Expected deployment version: ${{ steps.set-env.outputs.IMAGE_TAG }}"
           
-          # Wait up to 3 minutes (Watchtower polls every 1 minute + buffer)
-          max_attempts=12  # 12 attempts * 15 seconds = 3 minutes
+          # Wait up to 4 minutes (Watchtower polls every 1 minute + buffer)
+          max_attempts=16  # 16 attempts * 15 seconds = 4 minutes
           attempt=0
           
           while [ $attempt -lt $max_attempts ]; do
@@ -737,7 +791,7 @@ jobs:
             fi
           done
           
-          echo "TIMEOUT: Deployment verification failed after 3 minutes"
+          echo "TIMEOUT: Deployment verification failed after 4 minutes"
           echo "This could mean:"
           echo "1. Watchtower hasn't detected the new image yet (wait longer - polls every 1 minute)"
           echo "2. There's an issue with the new image"
