@@ -244,21 +244,33 @@ jobs:
             docker load < ~/mizual-image.tar.gz
             
             # Tag for local registry (backend and celery use same image)
-            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
-            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/${{ env.IMAGE_NAME }}:latest
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-backend:latest
             # Celery uses the same image as backend, just different registry name
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
             docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:latest
+            
+            # CRITICAL: Push ALL tags to registry immediately after tagging
+            echo "Pushing all tags to registry..."
+            docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
+            docker push localhost:5000/mizual-backend:latest
+            docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
+            docker push localhost:5000/mizual-celery:latest
             
             # Ensure latest tags always exist in registry (failsafe)
             echo "Failsafe: Ensuring latest tags exist in registry..."
             # Check if registry is accessible first
             if curl -f -s http://localhost:5000/v2/ > /dev/null; then
-              echo "Registry is accessible, pushing latest tags..."
-              echo "Pushing backend:latest..."
-              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest || echo "Warning: Failed to push backend:latest"
-              echo "Pushing celery:latest..."
-              docker push localhost:5000/mizual-celery:latest || echo "Warning: Failed to push celery:latest"
+              echo "Registry is accessible, verifying and pushing latest tags if needed..."
+              # Only push if not already in registry
+              if ! curl -s http://localhost:5000/v2/mizual-backend/tags/list | grep -q '"latest"'; then
+                echo "Pushing backend:latest..."
+                docker push localhost:5000/mizual-backend:latest || echo "ERROR: Failed to push backend:latest"
+              fi
+              if ! curl -s http://localhost:5000/v2/mizual-celery/tags/list | grep -q '"latest"'; then
+                echo "Pushing celery:latest..."
+                docker push localhost:5000/mizual-celery:latest || echo "ERROR: Failed to push celery:latest"
+              fi
               
               # Verify both latest tags exist
               echo "Verifying latest tags in registry:"
@@ -282,8 +294,8 @@ jobs:
               
               # Push images to registry
               echo "Pushing images to local registry..."
-              docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
-              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+              docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/mizual-backend:latest
               docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
               docker push localhost:5000/mizual-celery:latest
               
@@ -296,8 +308,8 @@ jobs:
               cd /opt/mizual
               
               # Push images to registry first
-              docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
-              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+              docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/mizual-backend:latest
               docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
               docker push localhost:5000/mizual-celery:latest
               
@@ -322,8 +334,8 @@ jobs:
               echo "SCENARIO: Normal zero-downtime update - Using Watchtower..."
               # Push to local registry
               echo "Pushing images to registry..."
-              docker push localhost:5000/${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }}
-              docker push localhost:5000/${{ env.IMAGE_NAME }}:latest
+              docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
+              docker push localhost:5000/mizual-backend:latest
               docker push localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
               docker push localhost:5000/mizual-celery:latest
               
