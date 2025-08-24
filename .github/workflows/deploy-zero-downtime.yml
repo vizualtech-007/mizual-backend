@@ -123,12 +123,60 @@ jobs:
           ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
             set -e
             
-            # Check if this is first deployment
+            # Check if this is first deployment or if directory exists but is not a git repo
             if [ ! -d /opt/mizual/.git ]; then
               echo "First deployment detected. Setting up repository..."
-              cd /opt/mizual
-              git clone https://github.com/vizualtech-007/mizual-backend.git .
-              git checkout ${{ github.ref_name }}
+              
+              # Check if directory exists but is not a git repo
+              if [ -d /opt/mizual ]; then
+                echo "Directory /opt/mizual exists but is not a git repository"
+                echo "Backing up any existing files..."
+                
+                # Backup any important files if they exist
+                if [ -f /opt/mizual/.env ]; then
+                  echo "Backing up existing .env file..."
+                  cp /opt/mizual/.env /opt/mizual/.env.backup
+                fi
+                
+                if [ -d /opt/mizual/registry-data ]; then
+                  echo "Registry data directory exists and will be preserved"
+                fi
+                
+                # Create a temporary directory for git clone
+                echo "Cloning repository to temporary location..."
+                cd /tmp
+                rm -rf mizual-temp
+                git clone https://github.com/vizualtech-007/mizual-backend.git mizual-temp
+                cd mizual-temp
+                git checkout ${{ github.ref_name }}
+                
+                # Copy git repo content to /opt/mizual
+                echo "Moving repository content to /opt/mizual..."
+                cp -r .git /opt/mizual/
+                cp -r * /opt/mizual/ 2>/dev/null || true
+                cp -r .* /opt/mizual/ 2>/dev/null || true
+                
+                # Clean up temp directory
+                cd /
+                rm -rf /tmp/mizual-temp
+                
+                # Restore backed up .env if it existed
+                if [ -f /opt/mizual/.env.backup ]; then
+                  echo "Restoring .env file..."
+                  mv /opt/mizual/.env.backup /opt/mizual/.env
+                fi
+                
+                cd /opt/mizual
+                echo "Repository initialized in existing directory"
+              else
+                # Directory doesn't exist, create and clone
+                echo "Creating /opt/mizual directory..."
+                sudo mkdir -p /opt/mizual
+                sudo chown ubuntu:ubuntu /opt/mizual
+                cd /opt/mizual
+                git clone https://github.com/vizualtech-007/mizual-backend.git .
+                git checkout ${{ github.ref_name }}
+              fi
             else
               echo "Updating existing repository..."
               cd /opt/mizual
