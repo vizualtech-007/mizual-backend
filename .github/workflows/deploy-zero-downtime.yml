@@ -451,9 +451,21 @@ jobs:
             set -e
             
             # Detect deployment scenario and handle accordingly
-            if ! docker ps | grep -q mizual-registry; then
-              echo "SCENARIO: First deployment (no registry) - Starting all services..."
+            # Check if any mizual containers exist (running or stopped)
+            CONTAINERS_EXIST=$(docker ps -a | grep -c mizual || echo "0")
+            
+            if [ "$CONTAINERS_EXIST" -eq "0" ]; then
+              echo "SCENARIO: First deployment (no containers exist) - Starting all services..."
               cd /opt/mizual
+              
+              # Verify .env file exists
+              if [ ! -f /opt/mizual/.env ]; then
+                echo "ERROR: .env file not found at /opt/mizual/.env"
+                echo "This should have been created from Parameter Store"
+                exit 1
+              fi
+              
+              echo ".env file exists with $(wc -l < /opt/mizual/.env) lines"
               
               # Start registry and watchtower (registry-data dir created by setup script)
               docker-compose -f docker-compose.zero-downtime.yml up -d registry watchtower
@@ -473,8 +485,8 @@ jobs:
               docker-compose -f docker-compose.zero-downtime.yml up -d
               echo "All services started for first deployment!"
               
-            elif ! docker ps | grep -q mizual-backend; then
-              echo "SCENARIO: Registry exists but containers stopped - Restarting services..."
+            elif ! docker ps | grep -q mizual-backend && docker ps -a | grep -q mizual-backend; then
+              echo "SCENARIO: Containers exist but are stopped - Restarting services..."
               cd /opt/mizual
               
               # Verify .env file exists (should have been SCPed earlier)
