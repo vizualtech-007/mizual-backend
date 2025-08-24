@@ -474,6 +474,15 @@ jobs:
               echo "SCENARIO: Registry exists but containers stopped - Restarting services..."
               cd /opt/mizual
               
+              # Verify .env file exists (should have been SCPed earlier)
+              if [ ! -f /opt/mizual/.env ]; then
+                echo "ERROR: .env file not found at /opt/mizual/.env"
+                echo "This should have been created from Parameter Store"
+                exit 1
+              fi
+              
+              echo ".env file exists with $(wc -l < /opt/mizual/.env) lines"
+              
               # Push images to registry first
               docker push localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
               docker push localhost:5000/mizual-backend:latest
