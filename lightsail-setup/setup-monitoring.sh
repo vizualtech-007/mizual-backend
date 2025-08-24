@@ -5,6 +5,11 @@
 
 set -e
 
+# Set non-interactive mode for entire script
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+
 echo "================================================"
 echo "Setting up Monitoring & Log Persistence"
 echo "================================================"
@@ -29,7 +34,7 @@ if ! command -v amazon-cloudwatch-agent &> /dev/null; then
     elif [ "$OS" = "ubuntu" ]; then
         echo "Installing on Ubuntu..."
         wget -q https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
-        sudo dpkg -i amazon-cloudwatch-agent.deb
+        sudo DEBIAN_FRONTEND=noninteractive dpkg -i amazon-cloudwatch-agent.deb
         rm -f amazon-cloudwatch-agent.deb
     fi
     echo "CloudWatch Agent installed successfully"
@@ -113,8 +118,8 @@ if ! command -v aws &> /dev/null; then
     if [ "$OS" = "amazon-linux" ]; then
         sudo yum install -y aws-cli
     elif [ "$OS" = "ubuntu" ]; then
-        sudo apt update
-        sudo apt install -y awscli
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq awscli -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
     fi
     echo "AWS CLI installed successfully"
 else
