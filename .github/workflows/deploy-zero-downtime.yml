@@ -120,6 +120,9 @@ jobs:
           
           echo "Environment file created with $(wc -l < .env) variables"
           
+          # Ensure /opt/mizual directory exists before copying .env
+          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} "sudo mkdir -p /opt/mizual && sudo chown ubuntu:ubuntu /opt/mizual"
+          
           # Copy to server
           scp -i ~/.ssh/deploy_key .env ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:/opt/mizual/.env
           
