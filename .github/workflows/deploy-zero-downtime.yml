@@ -118,7 +118,7 @@ jobs:
           # Copy to server
           scp -i ~/.ssh/deploy_key .env ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }}:/opt/mizual/.env
           
-      - name: Deploy to server
+      - name: Setup and Update Repository
         run: |
           ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
             set -e
@@ -238,6 +238,12 @@ jobs:
             fi
             
             echo "=== End monitoring check ==="
+          ENDSSH
+      
+      - name: Load and Push Docker Images
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
+            set -e
             
             # Load the Docker image
             echo "Loading Docker image..."
@@ -318,6 +324,12 @@ jobs:
             else
               echo "Registry not accessible yet, will be started in deployment scenario"
             fi
+          ENDSSH
+            
+      - name: Deploy Services
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
+            set -e
             
             # Detect deployment scenario and handle accordingly
             if ! docker ps | grep -q mizual-registry; then
@@ -470,6 +482,12 @@ jobs:
             else
               echo "✓ Both :latest tags confirmed in registry"
             fi
+          ENDSSH
+            
+      - name: Cleanup and Finalize
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ steps.set-env.outputs.DEPLOY_USER }}@${{ steps.set-env.outputs.DEPLOY_HOST }} << 'ENDSSH'
+            set -e
             
             # Clean up old images from registry (keep only latest 5 versions)
             echo "Cleaning up old registry images..."
@@ -684,6 +702,7 @@ jobs:
             cat /opt/mizual/CURRENT_VERSION 2>/dev/null || echo "Version file not found"
           ENDSSH
           
+          # Fail the workflow since deployment verification timed out
           exit 1
       
       - name: Cleanup
