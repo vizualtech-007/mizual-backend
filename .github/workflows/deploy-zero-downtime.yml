@@ -244,11 +244,12 @@ jobs:
             docker load < ~/mizual-image.tar.gz
             
             # Tag for local registry (backend and celery use same image)
-            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }}
-            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-backend:latest
+            echo "Tagging images for registry..."
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-backend:${{ steps.set-env.outputs.IMAGE_TAG }} || { echo "ERROR: Failed to tag backend with version"; exit 1; }
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-backend:latest || { echo "ERROR: Failed to tag backend as latest"; exit 1; }
             # Celery uses the same image as backend, just different registry name
-            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }}
-            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:latest
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:${{ steps.set-env.outputs.IMAGE_TAG }} || { echo "ERROR: Failed to tag celery with version"; exit 1; }
+            docker tag ${{ env.IMAGE_NAME }}:${{ steps.set-env.outputs.IMAGE_TAG }} localhost:5000/mizual-celery:latest || { echo "ERROR: Failed to tag celery as latest"; exit 1; }
             
             # CRITICAL: Push ALL tags to registry immediately after tagging
             echo "Pushing all tags to registry..."
