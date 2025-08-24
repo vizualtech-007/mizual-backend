@@ -67,8 +67,10 @@ jobs:
         run: |
           echo "Fetching environment variables from AWS Parameter Store..."
           
-          # Create .env file from Parameter Store
+          # ALWAYS create .env file fresh from Parameter Store (single source of truth)
+          # Never use cached or backup .env files
           echo "# Generated from AWS Parameter Store $(date)" > .env
+          echo "# This file is always recreated from Parameter Store on each deployment" >> .env
           
           # Fetch all parameters from Parameter Store
           aws ssm get-parameters-by-path \
@@ -98,6 +100,24 @@ jobs:
             echo "LLM_API_KEY=$GEMINI_KEY" >> .env
           fi
           
+          # CRITICAL: Verify Redis URLs are using 'redis' hostname, not 'localhost'
+          echo "Verifying Redis connection URLs..."
+          if grep -q "redis://localhost" .env; then
+            echo "ERROR: Found localhost in Redis URLs! This should be 'redis://redis:6379/0'"
+            echo "Please update AWS Parameter Store values:"
+            echo "  /mizual/celery_broker_url should be: redis://redis:6379/0"
+            echo "  /mizual/celery_result_backend should be: redis://redis:6379/0"
+            echo "Current incorrect values:"
+            grep "redis://localhost" .env
+            exit 1
+          fi
+          
+          # Show the Redis URLs for verification
+          echo "Redis URLs configured correctly:"
+          grep -E "CELERY_BROKER_URL|CELERY_RESULT_BACKEND" .env || echo "No Celery Redis URLs found"
+          
+          echo "Environment file created successfully from Parameter Store"
+          
           echo "Environment file created with $(wc -l < .env) variables"
           
           # Copy to server
@@ -117,10 +137,10 @@ jobs:
                 echo "Directory /opt/mizual exists but is not a git repository"
                 echo "Backing up any existing files..."
                 
-                # Backup any important files if they exist
+                # Remove old .env file - we'll get fresh one from Parameter Store
                 if [ -f /opt/mizual/.env ]; then
-                  echo "Backing up existing .env file..."
-                  cp /opt/mizual/.env /opt/mizual/.env.backup
+                  echo "Removing old .env file (will be replaced with fresh one from Parameter Store)"
+                  rm /opt/mizual/.env
                 fi
                 
                 if [ -d /opt/mizual/registry-data ]; then
@@ -145,11 +165,8 @@ jobs:
                 cd /
                 rm -rf /tmp/mizual-temp
                 
-                # Restore backed up .env if it existed
-                if [ -f /opt/mizual/.env.backup ]; then
-                  echo "Restoring .env file..."
-                  mv /opt/mizual/.env.backup /opt/mizual/.env
-                fi
+                # Ensure we have the fresh .env from Parameter Store (already SCPed earlier)
+                echo ".env file will be created fresh from Parameter Store"
                 
                 cd /opt/mizual
                 echo "Repository initialized in existing directory"
